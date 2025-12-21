@@ -1,4 +1,4 @@
-// search.js - Handle invalid URLs gracefully
+// search.js - With Airtable colored tags
 import { searchEntries, getAllEntries } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
@@ -35,7 +35,6 @@ async function performSearch(query, silent = false) {
     
     if (!query) {
         const all = await getAllEntries();
-        // Filter out invalid entries
         const valid = all.filter(e => e.sourceURL && e.sourceURL.trim());
         displayResults(valid, resultsContainer);
         return;
@@ -139,31 +138,34 @@ function displayResults(results, container) {
         if (copyBtn) {
             copyBtn.addEventListener('click', () => {
                 navigator.clipboard.writeText(entry.magnet);
-                showToast('📋 Magnet link copied!');
+                showToast('📋 Copied');
             });
         }
     });
 }
 
 function createResultRow(entry) {
-    // Validate entry
     if (!entry.sourceURL || !entry.sourceURL.trim()) {
-        return ''; // Skip invalid entries
+        return '';
     }
     
     const slug = extractSlug(entry.sourceURL);
     const peerCount = contentDHT.findPeers(slug).length;
     const index = currentResults.indexOf(entry);
     
-    // Safely get hostname
     let hostname = entry.sourceURL;
     try {
         const url = new URL(entry.sourceURL);
         hostname = url.hostname;
     } catch (e) {
-        // Invalid URL, just show the raw string
         hostname = entry.sourceURL.substring(0, 30) + '...';
     }
+    
+    // Pick tag color based on peer count
+    let peerTagClass = 'peer-tag';
+    if (peerCount >= 5) peerTagClass += ' tag-green';
+    else if (peerCount >= 3) peerTagClass += ' tag-teal';
+    else if (peerCount >= 1) peerTagClass += '';
     
     return `
         <div class="table-row">
@@ -175,13 +177,13 @@ function createResultRow(entry) {
             </div>
             <div class="col-title">
                 <strong>${entry.title || 'Untitled'}</strong>
-                ${peerCount > 0 ? `<br><small>👥 ${peerCount} peer(s)</small>` : ''}
+                ${peerCount > 0 ? `<small><span class="${peerTagClass}">👥 ${peerCount} peer${peerCount > 1 ? 's' : ''}</span></small>` : ''}
             </div>
             <div class="col-source">
                 <a href="${entry.sourceURL}" target="_blank" rel="noopener">
                     ${hostname}
                 </a>
-                <br><small>${new Date(entry.timestamp).toLocaleString()}</small>
+                <small>${new Date(entry.timestamp).toLocaleString()}</small>
             </div>
             <div class="col-user">
                 <span class="username">${entry.addedBy || 'Anonymous'}</span>
@@ -190,8 +192,8 @@ function createResultRow(entry) {
                 <code>${entry.magnet.slice(0, 40)}...</code>
             </div>
             <div class="col-actions">
-                <button id="copy-${index}" class="btn-copy">📋 Copy</button>
-                <a href="${entry.magnet}" class="btn-open">🔗 Open</a>
+                <button id="copy-${index}" class="btn-copy">Copy</button>
+                <a href="${entry.magnet}" class="btn-open">Open</a>
             </div>
         </div>
     `;
