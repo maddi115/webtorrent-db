@@ -1,9 +1,10 @@
-// peerManager.js - Handle entry requests
+// peerManager.js - Use WASM gossip
 import { PeerConnection } from './transport.js';
 import { contentDHT } from './contentDHT.js';
 import { getMyPeerId } from './dht.js';
 import { getAllEntries } from '../storage/db.js';
 import { extractSlug } from '../../shared/urlParser.js';
+import { gossipWASM } from './gossipWASM.js';
 import { logger } from '../../shared/logger.js';
 
 export class PeerManager {
@@ -77,9 +78,8 @@ export class PeerManager {
         
         switch (data.type) {
             case 'entry':
-                import('./gossip.js').then(({ gossip }) => {
-                    gossip.receiveEntry(data.entry);
-                });
+                // Use WASM gossip
+                await gossipWASM.receiveEntry(data.entry);
                 break;
                 
             case 'announce':
@@ -91,7 +91,6 @@ export class PeerManager {
                 break;
                 
             case 'request_entry':
-                // Someone is requesting an entry I have
                 await this.handleEntryRequest(data.contentId, fromPeerId);
                 break;
         }
@@ -100,7 +99,6 @@ export class PeerManager {
     async handleEntryRequest(contentId, requesterId) {
         logger.info(`📤 Peer ${requesterId.slice(0, 8)} requested: ${contentId}`);
         
-        // Find entry with matching slug
         const allEntries = await getAllEntries();
         const entry = allEntries.find(e => extractSlug(e.sourceURL) === contentId);
         

@@ -1,6 +1,6 @@
-// addEntry.js - Add entry with username
+// addEntry.js - Use WASM gossip
 import { addEntry } from '../storage/db.js';
-import { gossip } from '../network/gossip.js';
+import { gossipWASM } from '../network/gossipWASM.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
@@ -27,7 +27,7 @@ export function initAddEntry() {
             timestamp: Date.now(),
             preview: previewFile ? await uploadPreview(previewFile) : null,
             title: title,
-            addedBy: username  // Add username!
+            addedBy: username
         };
         
         await addEntry(entry);
@@ -35,7 +35,8 @@ export function initAddEntry() {
         const slug = extractSlug(sourceURL);
         contentDHT.announceContent(slug);
         
-        gossip.propagateEntry(entry);
+        // Use WASM gossip
+        gossipWASM.propagateEntry(entry);
         
         showToast(`✅ Added: ${title}`);
         

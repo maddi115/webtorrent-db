@@ -1,10 +1,12 @@
-// main.js - Re-announce existing entries after network init
+// main.js - Load WASM first, then initialize app
 import './style.css';
 import { initDB, reannounceAllEntries } from './browser/storage/db.js';
 import { initNetwork } from './browser/network/dht.js';
 import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initUsernameUI } from './browser/ui/username.js';
+import { initWASM } from './browser/wasm/wasmLoader.js';
+import { gossipWASM } from './browser/network/gossipWASM.js';
 import { logger } from './shared/logger.js';
 
 initUsernameUI();
@@ -14,7 +16,7 @@ loadingIndicator.id = 'loading-indicator';
 loadingIndicator.innerHTML = `
     <div class="loading-content">
         <div class="spinner"></div>
-        <p>🔄 Connecting to network...</p>
+        <p>🔄 Loading WASM modules...</p>
     </div>
 `;
 document.body.appendChild(loadingIndicator);
@@ -23,13 +25,18 @@ document.body.appendChild(loadingIndicator);
     try {
         logger.info('🚀 Initializing WebTorrent P2P DB...');
         
+        // Initialize WASM first
+        await initWASM();
+        await gossipWASM.init();
+        
+        loadingIndicator.querySelector('p').textContent = '🔄 Connecting to network...';
+        
         await initDB();
         logger.info('✅ Storage initialized');
         
         await initNetwork();
         logger.info('✅ Network initialized');
         
-        // RE-ANNOUNCE existing entries after network is ready
         setTimeout(async () => {
             await reannounceAllEntries();
         }, 2000);
@@ -41,7 +48,7 @@ document.body.appendChild(loadingIndicator);
         loadingIndicator.classList.add('fade-out');
         setTimeout(() => loadingIndicator.remove(), 500);
         
-        logger.info('🎉 Browser node ready!');
+        logger.info('🎉 Browser node ready with WASM acceleration!');
     } catch (error) {
         logger.error('❌ Failed to initialize:', error);
         loadingIndicator.innerHTML = `

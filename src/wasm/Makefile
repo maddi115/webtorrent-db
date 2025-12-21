@@ -1,13 +1,25 @@
-# Makefile for building WASM modules
-# Requires Emscripten (emcc)
+EMCC = emcc
+EMFLAGS = -O3 -s WASM=1 -s MODULARIZE=1 -s EXPORT_ES6=1 \
+          -s ALLOW_MEMORY_GROWTH=1 -s EXPORT_NAME="createModule" \
+          --bind -s ENVIRONMENT=web
 
-all:
-	@echo "WASM build requires Emscripten"
-	@echo "Install: https://emscripten.org/docs/getting_started/downloads.html"
-	@echo "Then run: make build"
+METADATA_SRC = metadata/crdt.cpp
+METADATA_OUT = ../wasm-dist/crdt.mjs
 
-build:
-	emcc metadata/crdt.cpp -o build/metadata.wasm -O3 -s WASM=1 -s MODULARIZE=1
+HASH_SRC = hashing/hash.cpp
+HASH_OUT = ../wasm-dist/hash.mjs
+
+all: crdt hash
+
+crdt:
+	mkdir -p ../wasm-dist
+	$(EMCC) $(EMFLAGS) $(METADATA_SRC) -o $(METADATA_OUT)
+
+hash:
+	mkdir -p ../wasm-dist
+	$(EMCC) $(EMFLAGS) $(HASH_SRC) -o $(HASH_OUT)
 
 clean:
-	rm -f build/*.wasm
+	rm -rf ../wasm-dist
+
+.PHONY: all crdt hash clean
