@@ -1,4 +1,4 @@
-// db.js - IndexedDB with migration for titles
+// db.js - Better duplicate handling
 import { openDB } from 'idb';
 import { extractTitle } from '../../shared/urlParser.js';
 
@@ -15,13 +15,12 @@ export async function initDB() {
                     keyPath: 'id', 
                     autoIncrement: true 
                 });
-                store.createIndex('sourceURL', 'sourceURL', { unique: true });
+                store.createIndex('sourceURL', 'sourceURL', { unique: false }); // NOT unique!
                 store.createIndex('timestamp', 'timestamp');
             }
         },
     });
     
-    // Migrate existing entries to fix titles
     await migrateExistingTitles();
 }
 
@@ -33,7 +32,6 @@ async function migrateExistingTitles() {
     let migrated = 0;
     
     for (const entry of allEntries) {
-        // If title is just numbers or empty, regenerate it
         if (!entry.title || /^\d+$/.test(entry.title)) {
             const newTitle = extractTitle(entry.sourceURL);
             entry.title = newTitle;
@@ -49,17 +47,29 @@ async function migrateExistingTitles() {
     }
 }
 
+export async function reannounceAllEntries() {
+    const { contentDHT } = await import('../network/contentDHT.js');
+    const { extractSlug } = await import('../../shared/urlParser.js');
+    
+    const allEntries = await getAllEntries();
+    
+    allEntries.forEach(entry => {
+        const slug = extractSlug(entry.sourceURL);
+        contentDHT.announceContent(slug);
+    });
+    
+    console.log(`📢 Re-announced ${allEntries.length} existing entries to DHT`);
+}
+
 export async function addEntry(entry) {
     try {
         const id = await db.add(STORE_NAME, entry);
-        updateEntryCount();
+        console.log('✅ Entry added to DB with ID:', id);
+        await updateEntryCount();
         return id;
     } catch (error) {
-        if (error.name === 'ConstraintError') {
-            console.warn('Entry already exists:', entry.sourceURL);
-        } else {
-            throw error;
-        }
+        console.error('❌ Failed to add entry:', error);
+        throw error;
     }
 }
 
@@ -72,7 +82,8 @@ export async function searchEntries(query) {
 }
 
 export async function getEntryByURL(url) {
-    return await db.getFromIndex(STORE_NAME, 'sourceURL', url);
+    const allEntries = await db.getAll(STORE_NAME);
+    return allEntries.find(e => e.sourceURL === url);
 }
 
 export async function getAllEntries() {
@@ -83,4 +94,5 @@ async function updateEntryCount() {
     const count = await db.count(STORE_NAME);
     const countEl = document.getElementById('entry-count');
     if (countEl) countEl.textContent = count;
+    console.log('📊 Total entries in DB:', count);
 }

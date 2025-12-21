@@ -1,7 +1,8 @@
-// search.js - Enhanced search with usernames in results
+// search.js - Request entries from peers who have them!
 import { searchEntries, getAllEntries } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
+import { connectToPeer } from '../network/dht.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
 import { logger } from '../../shared/logger.js';
 
@@ -11,7 +12,6 @@ let autoRefreshEnabled = true;
 export function initUI() {
     const searchBtn = document.getElementById('search-btn');
     const searchInput = document.getElementById('search-input');
-    const resultsContainer = document.getElementById('results-container');
     
     searchBtn.addEventListener('click', async () => {
         await performSearch(searchInput.value.trim());
@@ -40,13 +40,15 @@ async function performSearch(query, silent = false) {
     }
     
     if (!silent) {
-        resultsContainer.innerHTML = '<p>🔍 Searching local DB + peers...</p>';
+        resultsContainer.innerHTML = '<p>🔍 Searching local DB + discovering peers...</p>';
     }
     
     let results = [];
+    let contentId;
     
     if (isURL(query)) {
         const slug = extractSlug(query);
+        contentId = slug;
         logger.info(`Searching for URL/slug: ${slug}`);
         
         const allEntries = await getAllEntries();
@@ -55,31 +57,66 @@ async function performSearch(query, silent = false) {
             extractSlug(e.sourceURL).includes(slug)
         );
         
-        contentDHT.queryContent(slug);
-        
     } else {
+        contentId = normalizeSearchQuery(query);
         results = await searchEntries(query);
-        const normalized = normalizeSearchQuery(query);
-        contentDHT.queryContent(normalized);
     }
+    
+    // Query DHT for peers
+    contentDHT.queryContent(contentId);
+    
+    // Wait for DHT responses
+    setTimeout(() => {
+        const peersWithContent = contentDHT.findPeers(contentId);
+        
+        if (peersWithContent.length > 0) {
+            logger.info(`📡 Found ${peersWithContent.length} peers with this content`);
+            
+            // REQUEST data from CONNECTED peers first
+            const connectedPeersWithContent = peersWithContent.filter(peerId => 
+                peerManager.hasPeer(peerId)
+            );
+            
+            if (connectedPeersWithContent.length > 0) {
+                logger.info(`📥 Requesting entry from ${connectedPeersWithContent.length} connected peer(s)`);
+                
+                connectedPeersWithContent.forEach(peerId => {
+                    const peer = peerManager.getPeer(peerId);
+                    if (peer && peer.connected) {
+                        peer.send({
+                            type: 'request_entry',
+                            contentId: contentId
+                        });
+                    }
+                });
+                
+                if (!silent) {
+                    showToast(`📥 Requesting data from ${connectedPeersWithContent.length} peer(s)...`);
+                }
+            }
+            
+            // Try to connect to disconnected peers
+            const disconnectedPeers = peersWithContent.filter(peerId => 
+                !peerManager.hasPeer(peerId)
+            );
+            
+            if (disconnectedPeers.length > 0) {
+                logger.info(`🔗 Connecting to ${disconnectedPeers.length} new peer(s)`);
+                
+                disconnectedPeers.forEach(peerId => {
+                    connectToPeer(peerId);
+                });
+            }
+        }
+    }, 1000);
     
     currentResults = results;
     displayResults(results, resultsContainer);
-    
-    if (!silent) {
-        const peerCount = contentDHT.findPeers(
-            isURL(query) ? extractSlug(query) : normalizeSearchQuery(query)
-        ).length;
-        
-        if (peerCount > 0) {
-            logger.info(`✅ Found ${results.length} local + ${peerCount} peers with this content`);
-        }
-    }
 }
 
 function displayResults(results, container) {
     if (!results.length) {
-        container.innerHTML = '<p>No results found</p>';
+        container.innerHTML = '<p>No results found locally. Searching peers...</p>';
         return;
     }
     
@@ -151,10 +188,7 @@ function showToast(message) {
     toast.textContent = message;
     document.body.appendChild(toast);
     
-    setTimeout(() => {
-        toast.classList.add('show');
-    }, 100);
-    
+    setTimeout(() => toast.classList.add('show'), 100);
     setTimeout(() => {
         toast.classList.remove('show');
         setTimeout(() => toast.remove(), 300);

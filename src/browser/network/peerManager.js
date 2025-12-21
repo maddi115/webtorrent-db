@@ -1,6 +1,9 @@
-// peerManager.js - Handle DHT messages
+// peerManager.js - Handle entry requests
 import { PeerConnection } from './transport.js';
 import { contentDHT } from './contentDHT.js';
+import { getMyPeerId } from './dht.js';
+import { getAllEntries } from '../storage/db.js';
+import { extractSlug } from '../../shared/urlParser.js';
 import { logger } from '../../shared/logger.js';
 
 export class PeerManager {
@@ -14,9 +17,6 @@ export class PeerManager {
         conn.on('open', () => {
             logger.info(`✅ Incoming connection established: ${peerId}`);
             this.createPeerConnection(peerId, conn);
-            
-            // Share my content index
-            this.shareMyContent(peerId);
         });
     }
     
@@ -26,25 +26,7 @@ export class PeerManager {
         conn.on('open', () => {
             logger.info(`✅ Outgoing connection established: ${peerId}`);
             this.createPeerConnection(peerId, conn);
-            
-            // Share my content index
-            this.shareMyContent(peerId);
         });
-    }
-    
-    shareMyContent(peerId) {
-        const myContent = contentDHT.getMyContent();
-        const peer = this.getPeer(peerId);
-        
-        if (peer && myContent.length > 0) {
-            myContent.forEach(contentId => {
-                peer.send({
-                    type: 'announce',
-                    contentId,
-                    peerId: peerId
-                });
-            });
-        }
     }
     
     createPeerConnection(peerId, conn) {
@@ -63,9 +45,34 @@ export class PeerManager {
         conn.on('close', () => {
             this.removePeer(peerId);
         });
+        
+        setTimeout(() => {
+            this.shareMyContentIndex(peerConnection);
+        }, 1500);
     }
     
-    handlePeerData(data, fromPeerId) {
+    shareMyContentIndex(peerConnection) {
+        const myContent = contentDHT.getMyContent();
+        const myPeerId = getMyPeerId();
+        
+        if (!myPeerId || !peerConnection.connected) {
+            return;
+        }
+        
+        if (myContent.length > 0) {
+            logger.info(`📤 Sharing ${myContent.length} content announcements with ${peerConnection.peerId.slice(0, 8)}`);
+            
+            myContent.forEach(contentId => {
+                peerConnection.send({
+                    type: 'announce',
+                    contentId,
+                    peerId: myPeerId
+                });
+            });
+        }
+    }
+    
+    async handlePeerData(data, fromPeerId) {
         logger.info('🎯 Received data, type:', data.type);
         
         switch (data.type) {
@@ -76,12 +83,36 @@ export class PeerManager {
                 break;
                 
             case 'announce':
-                contentDHT.handleAnnouncement(data.contentId, data.peerId || fromPeerId);
+                contentDHT.handleAnnouncement(data.contentId, data.peerId);
                 break;
                 
             case 'query':
                 contentDHT.handleQuery(data.contentId, data.requesterId);
                 break;
+                
+            case 'request_entry':
+                // Someone is requesting an entry I have
+                await this.handleEntryRequest(data.contentId, fromPeerId);
+                break;
+        }
+    }
+    
+    async handleEntryRequest(contentId, requesterId) {
+        logger.info(`📤 Peer ${requesterId.slice(0, 8)} requested: ${contentId}`);
+        
+        // Find entry with matching slug
+        const allEntries = await getAllEntries();
+        const entry = allEntries.find(e => extractSlug(e.sourceURL) === contentId);
+        
+        if (entry) {
+            const peer = this.getPeer(requesterId);
+            if (peer && peer.connected) {
+                logger.info(`✅ Sending entry to ${requesterId.slice(0, 8)}`);
+                peer.send({
+                    type: 'entry',
+                    entry
+                });
+            }
         }
     }
     

@@ -1,6 +1,6 @@
-// gossip.js - With auto-refresh trigger
+// gossip.js - Check local DB, not just memory
 import { peerManager } from './peerManager.js';
-import { addEntry } from '../storage/db.js';
+import { addEntry, getEntryByURL } from '../storage/db.js';
 import { contentDHT } from './contentDHT.js';
 import { extractSlug } from '../../shared/urlParser.js';
 import { logger } from '../../shared/logger.js';
@@ -33,8 +33,12 @@ class GossipEngine {
         
         logger.info('🔍 Checking received entry:', entryId);
         
-        if (this.knownEntries.has(entryId)) {
-            logger.warn('⚠️  Entry already known, skipping:', entryId);
+        // Check if entry exists in LOCAL DB (not just memory)
+        const existingEntry = await getEntryByURL(entry.sourceURL);
+        
+        if (existingEntry) {
+            logger.warn('⚠️  Entry already in local DB, skipping');
+            this.knownEntries.add(entryId); // Mark as known
             return;
         }
         

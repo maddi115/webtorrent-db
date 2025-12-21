@@ -1,16 +1,14 @@
-// main.js - Load UI immediately with loading indicator
+// main.js - Re-announce existing entries after network init
 import './style.css';
-import { initDB } from './browser/storage/db.js';
+import { initDB, reannounceAllEntries } from './browser/storage/db.js';
 import { initNetwork } from './browser/network/dht.js';
 import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initUsernameUI } from './browser/ui/username.js';
 import { logger } from './shared/logger.js';
 
-// Load username UI immediately
 initUsernameUI();
 
-// Show loading indicator
 const loadingIndicator = document.createElement('div');
 loadingIndicator.id = 'loading-indicator';
 loadingIndicator.innerHTML = `
@@ -21,7 +19,6 @@ loadingIndicator.innerHTML = `
 `;
 document.body.appendChild(loadingIndicator);
 
-// Then do async initialization
 (async () => {
     try {
         logger.info('🚀 Initializing WebTorrent P2P DB...');
@@ -32,11 +29,15 @@ document.body.appendChild(loadingIndicator);
         await initNetwork();
         logger.info('✅ Network initialized');
         
+        // RE-ANNOUNCE existing entries after network is ready
+        setTimeout(async () => {
+            await reannounceAllEntries();
+        }, 2000);
+        
         initUI();
         initAddEntry();
         logger.info('✅ UI ready');
         
-        // Remove loading indicator
         loadingIndicator.classList.add('fade-out');
         setTimeout(() => loadingIndicator.remove(), 500);
         
@@ -46,7 +47,6 @@ document.body.appendChild(loadingIndicator);
         loadingIndicator.innerHTML = `
             <div class="loading-content">
                 <p>❌ Failed to connect</p>
-                <p style="font-size: 0.9rem; color: #888;">Check console for details</p>
             </div>
         `;
     }
