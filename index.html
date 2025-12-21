@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebTorrent P2P Metadata DB</title>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>WebTorrent P2P Metadata DB</h1>
+            <p>Decentralized link + preview sharing</p>
+        </header>
+
+        <!-- Add Entry Form -->
+        <section id="add-section">
+            <h2>Add Link</h2>
+            <input type="text" id="source-url" placeholder="External link (e.g., forum thread)">
+            <input type="text" id="magnet-link" placeholder="Magnet/WebTorrent link">
+            <input type="file" id="preview-upload" accept="image/*">
+            <button id="add-btn">Add to DB</button>
+        </section>
+
+        <!-- Search -->
+        <section id="search-section">
+            <h2>Search</h2>
+            <input type="text" id="search-input" placeholder="Search links...">
+            <button id="search-btn">Search</button>
+        </section>
+
+        <!-- Results -->
+        <section id="results-section">
+            <h2>Results</h2>
+            <div id="results-container"></div>
+        </section>
+
+        <!-- Peer Status -->
+        <footer id="status">
+            <span>Peers: <span id="peer-count">0</span></span>
+            <span>DB Entries: <span id="entry-count">0</span></span>
+        </footer>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
