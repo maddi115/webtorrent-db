@@ -9,7 +9,11 @@ METADATA_OUT = ../wasm-dist/crdt.mjs
 HASH_SRC = hashing/hash.cpp
 HASH_OUT = ../wasm-dist/hash.mjs
 
-all: crdt hash
+SERIALIZER_SRC = serialization/serializer.cpp
+SERIALIZER_OUT = ../wasm-dist/serializer.mjs
+SERIALIZER_FLAGS = -I/usr/local/include
+
+all: crdt hash serializer
 
 crdt:
 	mkdir -p ../wasm-dist
@@ -19,7 +23,11 @@ hash:
 	mkdir -p ../wasm-dist
 	$(EMCC) $(EMFLAGS) $(HASH_SRC) -o $(HASH_OUT)
 
+serializer:
+	mkdir -p ../wasm-dist
+	$(EMCC) $(EMFLAGS) $(SERIALIZER_FLAGS) $(SERIALIZER_SRC) -o $(SERIALIZER_OUT)
+
 clean:
 	rm -rf ../wasm-dist
 
-.PHONY: all crdt hash clean
+.PHONY: all crdt hash serializer clean

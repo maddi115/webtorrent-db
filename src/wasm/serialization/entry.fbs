@@ -1,0 +1,14 @@
+// entry.fbs - FlatBuffers schema for Entry
+
+namespace WebTorrentDB;
+
+table Entry {
+  source_url: string (required);
+  magnet: string (required);
+  title: string;
+  added_by: string;
+  preview: string;
+  timestamp: int64;
+}
+
+root_type Entry;

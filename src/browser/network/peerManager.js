@@ -1,10 +1,10 @@
-// peerManager.js - Use WASM gossip
+// peerManager.js - Pass preview separately
 import { PeerConnection } from './transport.js';
 import { contentDHT } from './contentDHT.js';
 import { getMyPeerId } from './dht.js';
 import { getAllEntries } from '../storage/db.js';
 import { extractSlug } from '../../shared/urlParser.js';
-import { gossipWASM } from './gossipWASM.js';
+import { gossipBinary } from './gossipBinary.js';
 import { logger } from '../../shared/logger.js';
 
 export class PeerManager {
@@ -77,9 +77,15 @@ export class PeerManager {
         logger.info('🎯 Received data, type:', data.type);
         
         switch (data.type) {
+            case 'entry_binary':
+                const entry = gossipBinary.deserializeBinary(data.binary, data.preview);
+                if (entry) {
+                    await gossipBinary.receiveEntry(entry, true);
+                }
+                break;
+                
             case 'entry':
-                // Use WASM gossip
-                await gossipWASM.receiveEntry(data.entry);
+                await gossipBinary.receiveEntry(data.entry, false);
                 break;
                 
             case 'announce':

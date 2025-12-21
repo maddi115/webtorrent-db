@@ -1,4 +1,4 @@
-// db.js - Better duplicate handling
+// db.js - Fixed unique constraint
 import { openDB } from 'idb';
 import { extractTitle } from '../../shared/urlParser.js';
 
@@ -8,43 +8,26 @@ const STORE_NAME = 'entries';
 let db;
 
 export async function initDB() {
-    db = await openDB(DB_NAME, 2, {
+    db = await openDB(DB_NAME, 3, {
         upgrade(upgradeDb, oldVersion) {
-            if (!upgradeDb.objectStoreNames.contains(STORE_NAME)) {
-                const store = upgradeDb.createObjectStore(STORE_NAME, { 
-                    keyPath: 'id', 
-                    autoIncrement: true 
-                });
-                store.createIndex('sourceURL', 'sourceURL', { unique: false }); // NOT unique!
-                store.createIndex('timestamp', 'timestamp');
+            // Delete old store if exists
+            if (upgradeDb.objectStoreNames.contains(STORE_NAME)) {
+                upgradeDb.deleteObjectStore(STORE_NAME);
             }
+            
+            // Create fresh store
+            const store = upgradeDb.createObjectStore(STORE_NAME, { 
+                keyPath: 'id', 
+                autoIncrement: true 
+            });
+            
+            // Non-unique index on sourceURL
+            store.createIndex('sourceURL', 'sourceURL', { unique: false });
+            store.createIndex('timestamp', 'timestamp');
         },
     });
     
-    await migrateExistingTitles();
-}
-
-async function migrateExistingTitles() {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    const allEntries = await store.getAll();
-    
-    let migrated = 0;
-    
-    for (const entry of allEntries) {
-        if (!entry.title || /^\d+$/.test(entry.title)) {
-            const newTitle = extractTitle(entry.sourceURL);
-            entry.title = newTitle;
-            await store.put(entry);
-            migrated++;
-        }
-    }
-    
-    await tx.done;
-    
-    if (migrated > 0) {
-        console.log(`✅ Migrated ${migrated} entries with proper titles`);
-    }
+    console.log('✅ Database initialized (v3)');
 }
 
 export async function reannounceAllEntries() {

@@ -1,4 +1,4 @@
-// search.js - Request entries from peers who have them!
+// search.js - Handle invalid URLs gracefully
 import { searchEntries, getAllEntries } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
@@ -35,7 +35,9 @@ async function performSearch(query, silent = false) {
     
     if (!query) {
         const all = await getAllEntries();
-        displayResults(all, resultsContainer);
+        // Filter out invalid entries
+        const valid = all.filter(e => e.sourceURL && e.sourceURL.trim());
+        displayResults(valid, resultsContainer);
         return;
     }
     
@@ -53,8 +55,10 @@ async function performSearch(query, silent = false) {
         
         const allEntries = await getAllEntries();
         results = allEntries.filter(e => 
-            e.sourceURL.includes(query) || 
-            extractSlug(e.sourceURL).includes(slug)
+            e.sourceURL && (
+                e.sourceURL.includes(query) || 
+                extractSlug(e.sourceURL).includes(slug)
+            )
         );
         
     } else {
@@ -62,17 +66,14 @@ async function performSearch(query, silent = false) {
         results = await searchEntries(query);
     }
     
-    // Query DHT for peers
     contentDHT.queryContent(contentId);
     
-    // Wait for DHT responses
     setTimeout(() => {
         const peersWithContent = contentDHT.findPeers(contentId);
         
         if (peersWithContent.length > 0) {
             logger.info(`📡 Found ${peersWithContent.length} peers with this content`);
             
-            // REQUEST data from CONNECTED peers first
             const connectedPeersWithContent = peersWithContent.filter(peerId => 
                 peerManager.hasPeer(peerId)
             );
@@ -95,7 +96,6 @@ async function performSearch(query, silent = false) {
                 }
             }
             
-            // Try to connect to disconnected peers
             const disconnectedPeers = peersWithContent.filter(peerId => 
                 !peerManager.hasPeer(peerId)
             );
@@ -146,9 +146,24 @@ function displayResults(results, container) {
 }
 
 function createResultRow(entry) {
+    // Validate entry
+    if (!entry.sourceURL || !entry.sourceURL.trim()) {
+        return ''; // Skip invalid entries
+    }
+    
     const slug = extractSlug(entry.sourceURL);
     const peerCount = contentDHT.findPeers(slug).length;
     const index = currentResults.indexOf(entry);
+    
+    // Safely get hostname
+    let hostname = entry.sourceURL;
+    try {
+        const url = new URL(entry.sourceURL);
+        hostname = url.hostname;
+    } catch (e) {
+        // Invalid URL, just show the raw string
+        hostname = entry.sourceURL.substring(0, 30) + '...';
+    }
     
     return `
         <div class="table-row">
@@ -164,7 +179,7 @@ function createResultRow(entry) {
             </div>
             <div class="col-source">
                 <a href="${entry.sourceURL}" target="_blank" rel="noopener">
-                    ${new URL(entry.sourceURL).hostname}
+                    ${hostname}
                 </a>
                 <br><small>${new Date(entry.timestamp).toLocaleString()}</small>
             </div>

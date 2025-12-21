@@ -1,4 +1,4 @@
-// main.js - Load WASM first, then initialize app
+// main.js - Use binary gossip
 import './style.css';
 import { initDB, reannounceAllEntries } from './browser/storage/db.js';
 import { initNetwork } from './browser/network/dht.js';
@@ -6,7 +6,7 @@ import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initUsernameUI } from './browser/ui/username.js';
 import { initWASM } from './browser/wasm/wasmLoader.js';
-import { gossipWASM } from './browser/network/gossipWASM.js';
+import { gossipBinary } from './browser/network/gossipBinary.js';
 import { logger } from './shared/logger.js';
 
 initUsernameUI();
@@ -25,9 +25,8 @@ document.body.appendChild(loadingIndicator);
     try {
         logger.info('🚀 Initializing WebTorrent P2P DB...');
         
-        // Initialize WASM first
         await initWASM();
-        await gossipWASM.init();
+        await gossipBinary.init();
         
         loadingIndicator.querySelector('p').textContent = '🔄 Connecting to network...';
         
@@ -48,7 +47,7 @@ document.body.appendChild(loadingIndicator);
         loadingIndicator.classList.add('fade-out');
         setTimeout(() => loadingIndicator.remove(), 500);
         
-        logger.info('🎉 Browser node ready with WASM acceleration!');
+        logger.info('🎉 Browser node ready with binary serialization!');
     } catch (error) {
         logger.error('❌ Failed to initialize:', error);
         loadingIndicator.innerHTML = `

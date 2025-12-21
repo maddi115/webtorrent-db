@@ -1,6 +1,6 @@
-// addEntry.js - Use WASM gossip
+// addEntry.js - Use binary gossip
 import { addEntry } from '../storage/db.js';
-import { gossipWASM } from '../network/gossipWASM.js';
+import { gossipBinary } from '../network/gossipBinary.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
@@ -35,8 +35,8 @@ export function initAddEntry() {
         const slug = extractSlug(sourceURL);
         contentDHT.announceContent(slug);
         
-        // Use WASM gossip
-        gossipWASM.propagateEntry(entry);
+        // Use binary gossip
+        gossipBinary.propagateEntry(entry);
         
         showToast(`✅ Added: ${title}`);
         
