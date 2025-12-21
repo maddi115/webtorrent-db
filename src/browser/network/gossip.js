@@ -1,6 +1,8 @@
-// gossip.js - Delta-based gossip with better logging
+// gossip.js - With auto-refresh trigger
 import { peerManager } from './peerManager.js';
 import { addEntry } from '../storage/db.js';
+import { contentDHT } from './contentDHT.js';
+import { extractSlug } from '../../shared/urlParser.js';
 import { logger } from '../../shared/logger.js';
 
 class GossipEngine {
@@ -20,7 +22,6 @@ class GossipEngine {
         
         logger.info('📤 Propagating entry to peers:', entry.sourceURL);
         
-        // Broadcast to all connected peers
         peerManager.broadcast({
             type: 'entry',
             entry
@@ -44,6 +45,19 @@ class GossipEngine {
         try {
             await addEntry(entry);
             logger.info('✅ Entry saved to local DB');
+            
+            // Announce to DHT
+            const slug = extractSlug(entry.sourceURL);
+            contentDHT.announceContent(slug);
+            
+            // Trigger auto-refresh
+            import('../ui/search.js').then(({ refreshResults }) => {
+                refreshResults();
+            });
+            
+            // Show toast
+            showToast(`📥 New: ${entry.title || 'Untitled'}`);
+            
         } catch (error) {
             logger.error('Failed to save received entry:', error);
         }
@@ -52,6 +66,19 @@ class GossipEngine {
     getEntryId(entry) {
         return `${entry.sourceURL}_${entry.timestamp}`;
     }
+}
+
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => toast.classList.add('show'), 100);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 export const gossip = new GossipEngine();

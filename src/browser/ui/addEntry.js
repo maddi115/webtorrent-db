@@ -1,6 +1,9 @@
-// addEntry.js - Add link + optional preview to DB
+// addEntry.js - Add entry with username
 import { addEntry } from '../storage/db.js';
 import { gossip } from '../network/gossip.js';
+import { contentDHT } from '../network/contentDHT.js';
+import { extractSlug, extractTitle } from '../../shared/urlParser.js';
+import { getUsername } from '../../shared/username.js';
 
 export function initAddEntry() {
     const addBtn = document.getElementById('add-btn');
@@ -15,23 +18,27 @@ export function initAddEntry() {
             return;
         }
         
+        const title = extractTitle(sourceURL);
+        const username = getUsername();
+        
         const entry = {
             sourceURL,
             magnet: magnetLink,
             timestamp: Date.now(),
             preview: previewFile ? await uploadPreview(previewFile) : null,
-            title: extractTitle(sourceURL)
+            title: title,
+            addedBy: username  // Add username!
         };
         
-        // Store in IndexedDB
         await addEntry(entry);
         
-        // Propagate via gossip
+        const slug = extractSlug(sourceURL);
+        contentDHT.announceContent(slug);
+        
         gossip.propagateEntry(entry);
         
-        alert('Entry added successfully!');
+        showToast(`✅ Added: ${title}`);
         
-        // Clear form
         document.getElementById('source-url').value = '';
         document.getElementById('magnet-link').value = '';
         document.getElementById('preview-upload').value = '';
@@ -46,12 +53,15 @@ async function uploadPreview(file) {
     });
 }
 
-function extractTitle(url) {
-    try {
-        const path = new URL(url).pathname;
-        const parts = path.split('/').filter(Boolean);
-        return parts[parts.length - 1].replace(/-/g, ' ') || 'Untitled';
-    } catch {
-        return 'Untitled';
-    }
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => toast.classList.add('show'), 100);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }

@@ -1,5 +1,6 @@
-// peerManager.js - Better logging
+// peerManager.js - Handle DHT messages
 import { PeerConnection } from './transport.js';
+import { contentDHT } from './contentDHT.js';
 import { logger } from '../../shared/logger.js';
 
 export class PeerManager {
@@ -13,6 +14,9 @@ export class PeerManager {
         conn.on('open', () => {
             logger.info(`✅ Incoming connection established: ${peerId}`);
             this.createPeerConnection(peerId, conn);
+            
+            // Share my content index
+            this.shareMyContent(peerId);
         });
     }
     
@@ -22,7 +26,25 @@ export class PeerManager {
         conn.on('open', () => {
             logger.info(`✅ Outgoing connection established: ${peerId}`);
             this.createPeerConnection(peerId, conn);
+            
+            // Share my content index
+            this.shareMyContent(peerId);
         });
+    }
+    
+    shareMyContent(peerId) {
+        const myContent = contentDHT.getMyContent();
+        const peer = this.getPeer(peerId);
+        
+        if (peer && myContent.length > 0) {
+            myContent.forEach(contentId => {
+                peer.send({
+                    type: 'announce',
+                    contentId,
+                    peerId: peerId
+                });
+            });
+        }
     }
     
     createPeerConnection(peerId, conn) {
@@ -31,8 +53,7 @@ export class PeerManager {
         }
         
         const peerConnection = new PeerConnection(peerId, (data) => {
-            logger.info('🎯 Received data from peer:', data);
-            this.handlePeerData(data);
+            this.handlePeerData(data, peerId);
         });
         
         peerConnection.setConnection(conn);
@@ -44,13 +65,23 @@ export class PeerManager {
         });
     }
     
-    handlePeerData(data) {
-        logger.info('🔧 Handling peer data, type:', data.type);
+    handlePeerData(data, fromPeerId) {
+        logger.info('🎯 Received data, type:', data.type);
         
-        if (data.type === 'entry') {
-            import('./gossip.js').then(({ gossip }) => {
-                gossip.receiveEntry(data.entry);
-            });
+        switch (data.type) {
+            case 'entry':
+                import('./gossip.js').then(({ gossip }) => {
+                    gossip.receiveEntry(data.entry);
+                });
+                break;
+                
+            case 'announce':
+                contentDHT.handleAnnouncement(data.contentId, data.peerId || fromPeerId);
+                break;
+                
+            case 'query':
+                contentDHT.handleQuery(data.contentId, data.requesterId);
+                break;
         }
     }
     
@@ -82,7 +113,6 @@ export class PeerManager {
     
     broadcast(message) {
         const connected = this.getConnectedPeers();
-        logger.info(`📡 Broadcasting to ${connected.length} peers`);
         connected.forEach(peer => {
             peer.send(message);
         });
