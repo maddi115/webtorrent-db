@@ -1,4 +1,4 @@
-// gossipBinary.js - Smart binary: exclude previews
+// gossipBinary.js - Remove ID before saving peer entries
 import { peerManager } from './peerManager.js';
 import { addEntry, getEntryByURL } from '../storage/db.js';
 import { contentDHT } from './contentDHT.js';
@@ -46,7 +46,6 @@ class GossipEngineBinary {
         
         if (this.useBinary && this.serializer) {
             try {
-                // Serialize METADATA only (no preview - it's too big)
                 const binary = this.serializer.serializeEntry(
                     entry.sourceURL,
                     entry.magnet,
@@ -61,7 +60,7 @@ class GossipEngineBinary {
                 message = {
                     type: 'entry_binary',
                     binary: base64,
-                    preview: entry.preview // Send preview separately
+                    preview: entry.preview
                 };
                 
                 messageType = '📦 [BINARY]';
@@ -132,7 +131,17 @@ class GossipEngineBinary {
                 logger.info(`⚡ CRDT now has ${this.crdt.getCount()} entries`);
             }
             
-            await addEntry(entry);
+            // CRITICAL FIX: Remove 'id' field from peer entries
+            const cleanEntry = {
+                sourceURL: entry.sourceURL,
+                magnet: entry.magnet,
+                title: entry.title,
+                addedBy: entry.addedBy,
+                preview: entry.preview,
+                timestamp: entry.timestamp
+            };
+            
+            await addEntry(cleanEntry);
             logger.info('✅ Entry saved to local DB');
             
             const slug = extractSlug(entry.sourceURL);
@@ -167,8 +176,6 @@ class GossipEngineBinary {
             }
             
             const entry = this.serializer.deserializeEntry(dataString);
-            
-            // Add preview back
             entry.preview = preview || null;
             
             logger.info(`📦 Deserialized metadata (${base64String.length} bytes) + preview`);

@@ -1,18 +1,18 @@
-// search.js - Card-style results with auto-search
-import { searchEntries, getAllEntries } from '../storage/db.js';
+// search.js - Paginated peer list
+import { searchEntries, getAllEntries, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { connectToPeer } from '../network/dht.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
 import { logger } from '../../shared/logger.js';
 
-let currentResults = [];
 let searchTimeout;
+const paginationState = {}; // Track current page per URL
+const PEERS_PER_PAGE = 13;
 
 export function initUI() {
     const searchInput = document.getElementById('search-input');
     
-    // Auto-search on input with debounce
     searchInput.addEventListener('input', (e) => {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
@@ -20,7 +20,6 @@ export function initUI() {
         }, 300);
     });
     
-    // Instant search on paste
     searchInput.addEventListener('paste', (e) => {
         setTimeout(() => {
             performSearch(searchInput.value.trim());
@@ -35,6 +34,8 @@ async function performSearch(query) {
         resultsContainer.innerHTML = '';
         return;
     }
+    
+    await trackSearch(query);
     
     let results = [];
     let contentId;
@@ -54,6 +55,8 @@ async function performSearch(query) {
         contentId = normalizeSearchQuery(query);
         results = await searchEntries(query);
     }
+    
+    console.log('Search results:', results);
     
     contentDHT.queryContent(contentId);
     
@@ -79,76 +82,201 @@ async function performSearch(query) {
         }
     }, 1000);
     
-    currentResults = results;
-    displayResults(results, resultsContainer);
+    await displayResults(results, resultsContainer);
 }
 
-function displayResults(results, container) {
+async function displayResults(results, container) {
     if (!results.length) {
         container.innerHTML = '<p style="color: hsl(0 0% 64%); font-size: 14px; padding: 16px; text-align: center;">No results found</p>';
         return;
     }
     
-    container.innerHTML = results.map(entry => createResultCard(entry)).join('');
+    const grouped = groupByURL(results);
     
-    // Add event listeners
-    results.forEach((entry, index) => {
-        const copyBtn = document.getElementById(`copy-${index}`);
+    const cards = await Promise.all(
+        Object.entries(grouped).map(([url, entries]) => createURLMatchCard(url, entries))
+    );
+    
+    container.innerHTML = cards.join('');
+    
+    // Add event listeners for all URLs
+    Object.entries(grouped).forEach(([url, entries]) => {
+        setupEventListeners(url, entries);
+    });
+}
+
+function groupByURL(results) {
+    const grouped = {};
+    
+    results.forEach(entry => {
+        if (!entry.sourceURL) return;
+        
+        if (!grouped[entry.sourceURL]) {
+            grouped[entry.sourceURL] = [];
+        }
+        grouped[entry.sourceURL].push(entry);
+    });
+    
+    return grouped;
+}
+
+async function createURLMatchCard(url, entries) {
+    if (!entries.length) return '';
+    
+    const firstEntry = entries[0];
+    const slug = extractSlug(url);
+    const peersOnline = contentDHT.findPeers(slug).length;
+    const stats = await getStats(slug);
+    
+    let hostname = url;
+    try {
+        const urlObj = new URL(url);
+        hostname = urlObj.hostname;
+    } catch (e) {
+        hostname = url.substring(0, 40) + '...';
+    }
+    
+    const urlId = btoa(url).replace(/[^a-zA-Z0-9]/g, '');
+    
+    // Initialize pagination
+    if (!paginationState[urlId]) {
+        paginationState[urlId] = 1;
+    }
+    
+    const totalPages = Math.ceil(entries.length / PEERS_PER_PAGE);
+    const currentPage = paginationState[urlId];
+    
+    return `
+        <div class="url-match-card">
+            <div class="url-match-summary">
+                <div class="url-preview">
+                    ${firstEntry.preview ? 
+                        `<img src="${firstEntry.preview}" alt="Preview">` : 
+                        '<div class="no-preview-large">📄</div>'
+                    }
+                </div>
+                <div class="url-info">
+                    <h3 class="url-title">${firstEntry.title || 'Untitled'}</h3>
+                    <a href="${url}" target="_blank" class="url-source">${hostname}</a>
+                    <div class="url-stats">
+                        <span class="stat">👥 ${peersOnline} peer${peersOnline !== 1 ? 's' : ''} online</span>
+                        <span class="stat">📥 ${stats.downloads} download${stats.downloads !== 1 ? 's' : ''}</span>
+                        <span class="stat">🔍 ${stats.searches} search${stats.searches !== 1 ? 'es' : ''}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="peer-list-section">
+                <div class="peer-list-header">
+                    <h4 class="peer-list-title">Peers who have this: ${currentPage}/${totalPages}</h4>
+                    ${totalPages > 1 ? `
+                        <div class="pagination-controls">
+                            <button class="page-btn" id="prev-${urlId}" ${currentPage === 1 ? 'disabled' : ''}>‹ Prev</button>
+                            <button class="page-btn" id="next-${urlId}" ${currentPage === totalPages ? 'disabled' : ''}>Next ›</button>
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="peer-list" id="peer-list-${urlId}">
+                    ${renderPeerPage(urlId, entries, currentPage)}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderPeerPage(urlId, entries, page) {
+    const start = (page - 1) * PEERS_PER_PAGE;
+    const end = start + PEERS_PER_PAGE;
+    const pageEntries = entries.slice(start, end);
+    
+    return pageEntries.map((entry, index) => createPeerCard(urlId, entry, start + index)).join('');
+}
+
+function createPeerCard(urlId, entry, globalIndex) {
+    return `
+        <div class="peer-card">
+            <span class="username">${entry.addedBy || 'Anonymous'}</span>
+            <div class="peer-actions">
+                <button id="copy-${urlId}-${globalIndex}">Copy Magnet</button>
+                <a id="open-${urlId}-${globalIndex}" href="${entry.magnet}" target="_blank">Open</a>
+            </div>
+        </div>
+    `;
+}
+
+function setupEventListeners(url, entries) {
+    const urlId = btoa(url).replace(/[^a-zA-Z0-9]/g, '');
+    
+    // Peer action buttons
+    entries.forEach((entry, index) => {
+        const copyBtn = document.getElementById(`copy-${urlId}-${index}`);
+        const openBtn = document.getElementById(`open-${urlId}-${index}`);
+        
         if (copyBtn) {
-            copyBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
+            copyBtn.addEventListener('click', () => {
                 navigator.clipboard.writeText(entry.magnet);
                 showToast('📋 Copied');
             });
         }
+        
+        if (openBtn) {
+            openBtn.addEventListener('click', () => {
+                trackDownload(url);
+            });
+        }
     });
+    
+    // Pagination buttons
+    const prevBtn = document.getElementById(`prev-${urlId}`);
+    const nextBtn = document.getElementById(`next-${urlId}`);
+    
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            paginationState[urlId]--;
+            updatePeerList(url, entries, urlId);
+        });
+    }
+    
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            paginationState[urlId]++;
+            updatePeerList(url, entries, urlId);
+        });
+    }
 }
 
-function createResultCard(entry) {
-    if (!entry.sourceURL || !entry.sourceURL.trim()) {
-        return '';
+function updatePeerList(url, entries, urlId) {
+    const peerListContainer = document.getElementById(`peer-list-${urlId}`);
+    const currentPage = paginationState[urlId];
+    const totalPages = Math.ceil(entries.length / PEERS_PER_PAGE);
+    
+    // Update peer list
+    peerListContainer.innerHTML = renderPeerPage(urlId, entries, currentPage);
+    
+    // Update pagination controls
+    const prevBtn = document.getElementById(`prev-${urlId}`);
+    const nextBtn = document.getElementById(`next-${urlId}`);
+    const title = document.querySelector(`#peer-list-${urlId}`).parentElement.querySelector('.peer-list-title');
+    
+    if (title) {
+        title.textContent = `Peers who have this: ${currentPage}/${totalPages}`;
     }
     
-    const slug = extractSlug(entry.sourceURL);
-    const peerCount = contentDHT.findPeers(slug).length;
-    const index = currentResults.indexOf(entry);
-    
-    let hostname = entry.sourceURL;
-    try {
-        const url = new URL(entry.sourceURL);
-        hostname = url.hostname;
-    } catch (e) {
-        hostname = entry.sourceURL.substring(0, 30) + '...';
+    if (prevBtn) {
+        prevBtn.disabled = currentPage === 1;
     }
     
-    let peerTagClass = 'peer-tag';
-    if (peerCount >= 5) peerTagClass += ' tag-green';
-    else if (peerCount >= 3) peerTagClass += ' tag-teal';
+    if (nextBtn) {
+        nextBtn.disabled = currentPage === totalPages;
+    }
     
-    return `
-        <div class="result-card">
-            <div class="result-header">
-                <div class="result-preview">
-                    ${entry.preview ? 
-                        `<img src="${entry.preview}" alt="Preview" loading="lazy">` : 
-                        '<div class="no-preview">📄</div>'
-                    }
-                </div>
-                <div class="result-info">
-                    <div class="result-title">${entry.title || 'Untitled'}</div>
-                    <div class="result-meta">
-                        <a href="${entry.sourceURL}" target="_blank" rel="noopener" class="result-source">${hostname}</a>
-                        <span class="username">${entry.addedBy || 'Anonymous'}</span>
-                        ${peerCount > 0 ? `<span class="${peerTagClass}">👥 ${peerCount}</span>` : ''}
-                    </div>
-                </div>
-            </div>
-            <div class="result-actions">
-                <button id="copy-${index}">Copy Magnet</button>
-                <a href="${entry.magnet}">Open</a>
-            </div>
-        </div>
-    `;
+    // Re-setup event listeners for new page
+    setupEventListeners(url, entries);
+}
+
+async function trackDownload(url) {
+    const { trackDownload: track } = await import('../storage/db.js');
+    await track(extractSlug(url));
 }
 
 function showToast(message) {
