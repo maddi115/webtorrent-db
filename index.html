@@ -14,7 +14,8 @@
                 <p>Decentralized metadata sharing</p>
             </header>
             
-            <div class="search-wrapper">
+            <!-- Search + Actions Row -->
+            <div class="search-row">
                 <input 
                     type="text" 
                     id="search-input" 
@@ -23,17 +24,17 @@
                     spellcheck="false"
                 />
                 
-                <div id="results-container"></div>
+                <div class="search-actions">
+                    <button id="add-entry-btn">+ Add Entry</button>
+                    <span id="username-display" class="username"></span>
+                </div>
             </div>
+            
+            <!-- Results below -->
+            <div id="results-container"></div>
         </div>
 
-        <!-- Hidden sections - show on click -->
-        <div class="actions-bar">
-            <button id="add-entry-btn">+ Add Entry</button>
-            <span id="username-display" class="username"></span>
-        </div>
-
-        <!-- Add Entry Modal (hidden by default) -->
+        <!-- Add Entry Modal -->
         <div id="add-modal" class="modal" style="display: none;">
             <div class="modal-content">
                 <span class="modal-close">&times;</span>

@@ -1,4 +1,4 @@
-/* Centered Search Design - Keep Airtable Tags */
+/* CSS Grid - Centered Search with Right Actions */
 
 :root {
   --background: 0 0% 7%;
@@ -35,9 +35,8 @@ body {
   padding: 40px 20px;
 }
 
-/* Centered Search Container */
 .search-container {
-  max-width: 450px;
+  max-width: 1400px;
   margin: 0 auto;
   width: 100%;
 }
@@ -59,12 +58,18 @@ header p {
   font-size: 14px;
 }
 
-/* Search Input */
-.search-wrapper {
-  width: 100%;
+/* CSS Grid: 3 columns to keep search centered */
+.search-row {
+  display: grid;
+  grid-template-columns: 1fr 450px 1fr;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
 }
 
+/* Search in center column */
 #search-input {
+  grid-column: 2;
   width: 100%;
   padding: 16px 20px;
   background: hsl(var(--search-bg));
@@ -84,13 +89,38 @@ header p {
   color: hsl(var(--muted-foreground));
 }
 
-/* Results - 450px below search */
+/* Actions in right column */
+.search-actions {
+  grid-column: 3;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-self: start;
+}
+
+#add-entry-btn {
+  padding: 10px 16px;
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+#add-entry-btn:hover {
+  opacity: 0.9;
+}
+
+/* Results - 450px centered */
 #results-container {
-  margin-top: 8px;
-  width: 100%;
+  width: 450px;
+  margin: 0 auto;
   max-height: 600px;
   overflow-y: auto;
-  border-radius: 8px;
 }
 
 #results-container:empty {
@@ -176,7 +206,7 @@ header p {
   text-decoration: underline;
 }
 
-/* Airtable-Style Tags (KEEP THESE!) */
+/* Airtable Tags */
 .username {
   display: inline-flex;
   align-items: center;
@@ -238,32 +268,6 @@ header p {
 .result-actions button:hover,
 .result-actions a:hover {
   background: hsl(0 0% 16%);
-}
-
-/* Actions Bar */
-.actions-bar {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  z-index: 100;
-}
-
-#add-entry-btn {
-  padding: 8px 16px;
-  background: hsl(var(--foreground));
-  color: hsl(var(--background));
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-#add-entry-btn:hover {
-  opacity: 0.9;
 }
 
 /* Modal */
@@ -437,4 +441,25 @@ footer span {
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(0 0% 25%);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .search-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  #search-input {
+    grid-column: 1;
+  }
+  
+  .search-actions {
+    grid-column: 1;
+    justify-self: center;
+  }
+  
+  #results-container {
+    width: 100%;
+  }
 }
