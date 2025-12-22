@@ -1,4 +1,4 @@
-// addEntry.js - Modal-based add entry
+// addEntry.js - Either, both, or at least one
 import { addEntry } from '../storage/db.js';
 import { gossipBinary } from '../network/gossipBinary.js';
 import { contentDHT } from '../network/contentDHT.js';
@@ -11,31 +11,34 @@ export function initAddEntry() {
     const closeBtn = modal.querySelector('.modal-close');
     const addBtn = document.getElementById('add-btn');
     
-    // Show modal
     addEntryBtn.addEventListener('click', () => {
         modal.style.display = 'flex';
     });
     
-    // Close modal
     closeBtn.addEventListener('click', () => {
         modal.style.display = 'none';
     });
     
-    // Close on outside click
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             modal.style.display = 'none';
         }
     });
     
-    // Add entry
     addBtn.addEventListener('click', async () => {
-        const sourceURL = document.getElementById('source-url').value;
-        const magnetLink = document.getElementById('magnet-link').value;
+        const sourceURL = document.getElementById('source-url').value.trim();
+        const magnetLink = document.getElementById('magnet-link').value.trim();
+        const instantIOLink = document.getElementById('instantio-link').value.trim();
         const previewFile = document.getElementById('preview-upload').files[0];
         
-        if (!sourceURL || !magnetLink) {
-            alert('Please provide both URL and magnet link');
+        if (!sourceURL) {
+            alert('Please provide a source URL');
+            return;
+        }
+        
+        // Validate: at least one must be filled
+        if (!magnetLink && !instantIOLink) {
+            alert('Please provide at least one: magnet link or instant.io link');
             return;
         }
         
@@ -44,7 +47,8 @@ export function initAddEntry() {
         
         const entry = {
             sourceURL,
-            magnet: magnetLink,
+            magnet: magnetLink || null,
+            instantIOLink: instantIOLink || null,
             timestamp: Date.now(),
             preview: previewFile ? await uploadPreview(previewFile) : null,
             title: title,
@@ -59,9 +63,9 @@ export function initAddEntry() {
         
         showToast(`✅ Added: ${title}`);
         
-        // Clear and close
         document.getElementById('source-url').value = '';
         document.getElementById('magnet-link').value = '';
+        document.getElementById('instantio-link').value = '';
         document.getElementById('preview-upload').value = '';
         modal.style.display = 'none';
     });

@@ -1,14 +1,23 @@
-// search.js - Paginated peer list
+// search.js - Thread pagination (8 per page)
 import { searchEntries, getAllEntries, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { connectToPeer } from '../network/dht.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
+import { downloadManager } from '../downloads/downloadManager.js';
 import { logger } from '../../shared/logger.js';
 
 let searchTimeout;
-const paginationState = {}; // Track current page per URL
+const paginationState = {};
+const downloadStates = {};
+const threadStates = {};
+const threadPageStates = {}; // Track page per thread
 const PEERS_PER_PAGE = 13;
+const THREAD_ENTRIES_PER_PAGE = 8;
+
+function createSafeId(str) {
+    return str.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50);
+}
 
 export function initUI() {
     const searchInput = document.getElementById('search-input');
@@ -56,8 +65,6 @@ async function performSearch(query) {
         results = await searchEntries(query);
     }
     
-    console.log('Search results:', results);
-    
     contentDHT.queryContent(contentId);
     
     setTimeout(() => {
@@ -99,7 +106,6 @@ async function displayResults(results, container) {
     
     container.innerHTML = cards.join('');
     
-    // Add event listeners for all URLs
     Object.entries(grouped).forEach(([url, entries]) => {
         setupEventListeners(url, entries);
     });
@@ -136,9 +142,8 @@ async function createURLMatchCard(url, entries) {
         hostname = url.substring(0, 40) + '...';
     }
     
-    const urlId = btoa(url).replace(/[^a-zA-Z0-9]/g, '');
+    const urlId = createSafeId(url);
     
-    // Initialize pagination
     if (!paginationState[urlId]) {
         paginationState[urlId] = 1;
     }
@@ -189,44 +194,256 @@ function renderPeerPage(urlId, entries, page) {
     const end = start + PEERS_PER_PAGE;
     const pageEntries = entries.slice(start, end);
     
-    return pageEntries.map((entry, index) => createPeerCard(urlId, entry, start + index)).join('');
+    const userGroups = {};
+    pageEntries.forEach((entry, index) => {
+        const username = entry.addedBy || 'Anonymous';
+        if (!userGroups[username]) {
+            userGroups[username] = [];
+        }
+        userGroups[username].push({ entry, globalIndex: start + index });
+    });
+    
+    return Object.entries(userGroups).map(([username, items]) => {
+        if (items.length > 1) {
+            return createPeerThread(urlId, username, items);
+        } else {
+            return createPeerCard(urlId, items[0].entry, items[0].globalIndex);
+        }
+    }).join('');
+}
+
+function createPeerThread(urlId, username, items) {
+    const threadId = `thread-${urlId}-${createSafeId(username)}`;
+    const isExpanded = threadStates[threadId] || false;
+    
+    // Initialize thread page
+    if (!threadPageStates[threadId]) {
+        threadPageStates[threadId] = 1;
+    }
+    
+    const currentThreadPage = threadPageStates[threadId];
+    const totalThreadPages = Math.ceil(items.length / THREAD_ENTRIES_PER_PAGE);
+    
+    // Paginate thread entries
+    const threadStart = (currentThreadPage - 1) * THREAD_ENTRIES_PER_PAGE;
+    const threadEnd = threadStart + THREAD_ENTRIES_PER_PAGE;
+    const paginatedItems = items.slice(threadStart, threadEnd);
+    
+    const startNum = threadStart + 1;
+    const endNum = Math.min(threadEnd, items.length);
+    
+    const threadEntries = paginatedItems.map(({ entry, globalIndex }) => {
+        const hasMagnet = entry.magnet && entry.magnet.trim();
+        const hasInstantIO = entry.instantIOLink && entry.instantIOLink.trim();
+        
+        const buttonId = `${urlId}-${globalIndex}`;
+        const buttonState = downloadStates[buttonId] || 'idle';
+        
+        let buttons = '';
+        
+        if (hasMagnet) {
+            let buttonText = 'Download';
+            let buttonClass = 'download-btn';
+            let disabled = '';
+            
+            if (buttonState === 'downloading') {
+                buttonText = 'Downloading';
+                disabled = 'disabled';
+            } else if (buttonState === 'downloaded') {
+                buttonText = 'Downloaded';
+                buttonClass = 'downloaded-btn';
+                disabled = 'disabled';
+            }
+            
+            buttons += `
+                <button id="copy-${urlId}-${globalIndex}">Copy Magnet</button>
+                <button id="download-${urlId}-${globalIndex}" class="${buttonClass}" ${disabled}>${buttonText}</button>
+            `;
+        }
+        
+        if (hasInstantIO) {
+            buttons += `
+                <a href="${entry.instantIOLink}" target="_blank" class="instantio-btn">instant.io ↗</a>
+            `;
+        }
+        
+        return `
+            <div class="thread-entry">
+                <div class="peer-actions">
+                    ${buttons || '<span style="color: hsl(0 0% 64%); font-size: 12px;">No link</span>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    return `
+        <div class="peer-thread ${isExpanded ? 'expanded' : 'collapsed'}">
+            <div class="thread-header" id="${threadId}-header">
+                <span class="username">${username} (${items.length} entries)</span>
+                <button class="expand-btn" id="${threadId}-btn">
+                    ${isExpanded ? 'Collapse ▲' : 'Expand ▼'}
+                </button>
+            </div>
+            <div class="thread-entries" id="${threadId}-entries" style="${isExpanded ? '' : 'display: none;'}">
+                ${totalThreadPages > 1 ? `
+                    <div class="thread-pagination">
+                        <span class="thread-page-info">Showing ${startNum}-${endNum} of ${items.length}</span>
+                        <div class="pagination-controls">
+                            <button class="page-btn" id="thread-prev-${threadId}" ${currentThreadPage === 1 ? 'disabled' : ''}>‹ Prev</button>
+                            <button class="page-btn" id="thread-next-${threadId}" ${currentThreadPage === totalThreadPages ? 'disabled' : ''}>Next ›</button>
+                        </div>
+                    </div>
+                ` : ''}
+                ${threadEntries}
+            </div>
+        </div>
+    `;
 }
 
 function createPeerCard(urlId, entry, globalIndex) {
+    const hasMagnet = entry.magnet && entry.magnet.trim();
+    const hasInstantIO = entry.instantIOLink && entry.instantIOLink.trim();
+    
+    const buttonId = `${urlId}-${globalIndex}`;
+    const buttonState = downloadStates[buttonId] || 'idle';
+    
+    let buttons = '';
+    
+    if (hasMagnet) {
+        let buttonText = 'Download';
+        let buttonClass = 'download-btn';
+        let disabled = '';
+        
+        if (buttonState === 'downloading') {
+            buttonText = 'Downloading';
+            disabled = 'disabled';
+        } else if (buttonState === 'downloaded') {
+            buttonText = 'Downloaded';
+            buttonClass = 'downloaded-btn';
+            disabled = 'disabled';
+        }
+        
+        buttons += `
+            <button id="copy-${urlId}-${globalIndex}">Copy Magnet</button>
+            <button id="download-${urlId}-${globalIndex}" class="${buttonClass}" ${disabled}>${buttonText}</button>
+        `;
+    }
+    
+    if (hasInstantIO) {
+        buttons += `
+            <a href="${entry.instantIOLink}" target="_blank" class="instantio-btn">instant.io ↗</a>
+        `;
+    }
+    
+    if (!hasMagnet && !hasInstantIO) {
+        buttons = '<span style="color: hsl(0 0% 64%); font-size: 12px;">No link provided</span>';
+    }
+    
     return `
         <div class="peer-card">
             <span class="username">${entry.addedBy || 'Anonymous'}</span>
             <div class="peer-actions">
-                <button id="copy-${urlId}-${globalIndex}">Copy Magnet</button>
-                <a id="open-${urlId}-${globalIndex}" href="${entry.magnet}" target="_blank">Open</a>
+                ${buttons}
             </div>
         </div>
     `;
 }
 
 function setupEventListeners(url, entries) {
-    const urlId = btoa(url).replace(/[^a-zA-Z0-9]/g, '');
+    const urlId = createSafeId(url);
     
-    // Peer action buttons
     entries.forEach((entry, index) => {
-        const copyBtn = document.getElementById(`copy-${urlId}-${index}`);
-        const openBtn = document.getElementById(`open-${urlId}-${index}`);
-        
-        if (copyBtn) {
-            copyBtn.addEventListener('click', () => {
-                navigator.clipboard.writeText(entry.magnet);
-                showToast('📋 Copied');
-            });
-        }
-        
-        if (openBtn) {
-            openBtn.addEventListener('click', () => {
-                trackDownload(url);
-            });
+        if (entry.magnet && entry.magnet.trim()) {
+            const copyBtn = document.getElementById(`copy-${urlId}-${index}`);
+            const downloadBtn = document.getElementById(`download-${urlId}-${index}`);
+            const buttonId = `${urlId}-${index}`;
+            
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(entry.magnet);
+                    showToast('📋 Magnet link copied');
+                });
+            }
+            
+            if (downloadBtn) {
+                downloadBtn.addEventListener('click', async () => {
+                    downloadStates[buttonId] = 'downloading';
+                    downloadBtn.textContent = 'Downloading';
+                    downloadBtn.disabled = true;
+                    downloadBtn.classList.remove('download-btn');
+                    
+                    downloadManager.startDownload(
+                        entry.magnet, 
+                        entry.sourceURL, 
+                        entry.title,
+                        () => {
+                            downloadStates[buttonId] = 'downloaded';
+                            downloadBtn.textContent = 'Downloaded';
+                            downloadBtn.classList.add('downloaded-btn');
+                            
+                            import('../storage/db.js').then(({ trackDownload }) => {
+                                trackDownload(extractSlug(url));
+                            });
+                        }
+                    );
+                });
+            }
         }
     });
     
-    // Pagination buttons
+    // Group entries by username for thread listeners
+    const userGroups = {};
+    entries.forEach(entry => {
+        const username = entry.addedBy || 'Anonymous';
+        if (!userGroups[username]) {
+            userGroups[username] = [];
+        }
+        userGroups[username].push(entry);
+    });
+    
+    Object.entries(userGroups).forEach(([username, userEntries]) => {
+        if (userEntries.length > 1) {
+            const threadId = `thread-${urlId}-${createSafeId(username)}`;
+            const expandBtn = document.getElementById(`${threadId}-btn`);
+            const entriesDiv = document.getElementById(`${threadId}-entries`);
+            
+            // Expand/collapse listener
+            if (expandBtn && entriesDiv) {
+                expandBtn.addEventListener('click', () => {
+                    const isExpanded = threadStates[threadId] || false;
+                    threadStates[threadId] = !isExpanded;
+                    
+                    if (threadStates[threadId]) {
+                        entriesDiv.style.display = 'block';
+                        expandBtn.textContent = 'Collapse ▲';
+                    } else {
+                        entriesDiv.style.display = 'none';
+                        expandBtn.textContent = 'Expand ▼';
+                    }
+                });
+            }
+            
+            // Thread pagination listeners
+            const threadPrevBtn = document.getElementById(`thread-prev-${threadId}`);
+            const threadNextBtn = document.getElementById(`thread-next-${threadId}`);
+            
+            if (threadPrevBtn) {
+                threadPrevBtn.addEventListener('click', () => {
+                    threadPageStates[threadId]--;
+                    updatePeerList(url, entries, urlId);
+                });
+            }
+            
+            if (threadNextBtn) {
+                threadNextBtn.addEventListener('click', () => {
+                    threadPageStates[threadId]++;
+                    updatePeerList(url, entries, urlId);
+                });
+            }
+        }
+    });
+    
+    // Main pagination listeners
     const prevBtn = document.getElementById(`prev-${urlId}`);
     const nextBtn = document.getElementById(`next-${urlId}`);
     
@@ -250,10 +467,8 @@ function updatePeerList(url, entries, urlId) {
     const currentPage = paginationState[urlId];
     const totalPages = Math.ceil(entries.length / PEERS_PER_PAGE);
     
-    // Update peer list
     peerListContainer.innerHTML = renderPeerPage(urlId, entries, currentPage);
     
-    // Update pagination controls
     const prevBtn = document.getElementById(`prev-${urlId}`);
     const nextBtn = document.getElementById(`next-${urlId}`);
     const title = document.querySelector(`#peer-list-${urlId}`).parentElement.querySelector('.peer-list-title');
@@ -270,13 +485,7 @@ function updatePeerList(url, entries, urlId) {
         nextBtn.disabled = currentPage === totalPages;
     }
     
-    // Re-setup event listeners for new page
     setupEventListeners(url, entries);
-}
-
-async function trackDownload(url) {
-    const { trackDownload: track } = await import('../storage/db.js');
-    await track(extractSlug(url));
 }
 
 function showToast(message) {

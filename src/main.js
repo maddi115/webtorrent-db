@@ -1,4 +1,4 @@
-// main.js - Use binary gossip
+// main.js - Initialize with WebTorrent
 import './style.css';
 import { initDB, reannounceAllEntries } from './browser/storage/db.js';
 import { initNetwork } from './browser/network/dht.js';
@@ -7,6 +7,7 @@ import { initAddEntry } from './browser/ui/addEntry.js';
 import { initUsernameUI } from './browser/ui/username.js';
 import { initWASM } from './browser/wasm/wasmLoader.js';
 import { gossipBinary } from './browser/network/gossipBinary.js';
+import { downloadManager } from './browser/downloads/downloadManager.js';
 import { logger } from './shared/logger.js';
 
 initUsernameUI();
@@ -28,6 +29,9 @@ document.body.appendChild(loadingIndicator);
         await initWASM();
         await gossipBinary.init();
         
+        // Initialize WebTorrent
+        downloadManager.init();
+        
         loadingIndicator.querySelector('p').textContent = '🔄 Connecting to network...';
         
         await initDB();
@@ -47,7 +51,7 @@ document.body.appendChild(loadingIndicator);
         loadingIndicator.classList.add('fade-out');
         setTimeout(() => loadingIndicator.remove(), 500);
         
-        logger.info('🎉 Browser node ready with binary serialization!');
+        logger.info('🎉 Browser node ready with WebTorrent streaming!');
     } catch (error) {
         logger.error('❌ Failed to initialize:', error);
         loadingIndicator.innerHTML = `
