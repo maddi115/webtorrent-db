@@ -7,37 +7,48 @@
 </head>
 <body>
     <div id="app">
-        <header>
-            <h1>WebTorrent P2P Metadata DB</h1>
-            <p>Decentralized link + preview sharing</p>
-        </header>
+        <!-- Centered Search -->
+        <div class="search-container">
+            <header>
+                <h1>WebTorrent P2P DB</h1>
+                <p>Decentralized metadata sharing</p>
+            </header>
+            
+            <div class="search-wrapper">
+                <input 
+                    type="text" 
+                    id="search-input" 
+                    placeholder="Search or paste link..." 
+                    autocomplete="off"
+                    spellcheck="false"
+                />
+                
+                <div id="results-container"></div>
+            </div>
+        </div>
 
-        <!-- Search (TOP) -->
-        <section id="search-section">
-            <h2>Search</h2>
-            <input type="text" id="search-input" placeholder="Search by URL, title, or keywords...">
-            <button id="search-btn">Search</button>
-        </section>
+        <!-- Hidden sections - show on click -->
+        <div class="actions-bar">
+            <button id="add-entry-btn">+ Add Entry</button>
+            <span id="username-display" class="username"></span>
+        </div>
 
-        <!-- Results (RIGHT AFTER SEARCH) -->
-        <section id="results-section">
-            <h2>Results</h2>
-            <div id="results-container"></div>
-        </section>
+        <!-- Add Entry Modal (hidden by default) -->
+        <div id="add-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="modal-close">&times;</span>
+                <h2>Add Entry</h2>
+                <input type="text" id="source-url" placeholder="Source URL">
+                <input type="text" id="magnet-link" placeholder="Magnet Link">
+                <input type="file" id="preview-upload" accept="image/*">
+                <button id="add-btn">Add to DB</button>
+            </div>
+        </div>
 
-        <!-- Add Entry Form -->
-        <section id="add-section">
-            <h2>Add Link</h2>
-            <input type="text" id="source-url" placeholder="External link (e.g., forum thread)">
-            <input type="text" id="magnet-link" placeholder="Magnet/WebTorrent link">
-            <input type="file" id="preview-upload" accept="image/*">
-            <button id="add-btn">Add to DB</button>
-        </section>
-
-        <!-- Peer Status -->
-        <footer id="status">
+        <!-- Footer -->
+        <footer>
             <span>Peers: <span id="peer-count">0</span></span>
-            <span>DB Entries: <span id="entry-count">0</span></span>
+            <span>Entries: <span id="entry-count">0</span></span>
         </footer>
     </div>
 

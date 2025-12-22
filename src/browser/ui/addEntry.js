@@ -1,4 +1,4 @@
-// addEntry.js - Use binary gossip
+// addEntry.js - Modal-based add entry
 import { addEntry } from '../storage/db.js';
 import { gossipBinary } from '../network/gossipBinary.js';
 import { contentDHT } from '../network/contentDHT.js';
@@ -6,8 +6,29 @@ import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
 
 export function initAddEntry() {
+    const addEntryBtn = document.getElementById('add-entry-btn');
+    const modal = document.getElementById('add-modal');
+    const closeBtn = modal.querySelector('.modal-close');
     const addBtn = document.getElementById('add-btn');
     
+    // Show modal
+    addEntryBtn.addEventListener('click', () => {
+        modal.style.display = 'flex';
+    });
+    
+    // Close modal
+    closeBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+    
+    // Close on outside click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+    
+    // Add entry
     addBtn.addEventListener('click', async () => {
         const sourceURL = document.getElementById('source-url').value;
         const magnetLink = document.getElementById('magnet-link').value;
@@ -34,15 +55,15 @@ export function initAddEntry() {
         
         const slug = extractSlug(sourceURL);
         contentDHT.announceContent(slug);
-        
-        // Use binary gossip
         gossipBinary.propagateEntry(entry);
         
         showToast(`✅ Added: ${title}`);
         
+        // Clear and close
         document.getElementById('source-url').value = '';
         document.getElementById('magnet-link').value = '';
         document.getElementById('preview-upload').value = '';
+        modal.style.display = 'none';
     });
 }
 
