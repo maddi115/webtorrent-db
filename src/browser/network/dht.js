@@ -1,123 +1,133 @@
-// dht.js - Connect to OUR signaling server for auto-discovery
+// dht.js - Wait for WebSocket to be open before sending
 import Peer from 'peerjs';
 import { peerManager } from './peerManager.js';
+import { contentDHT } from './contentDHT.js';
 import { logger } from '../../shared/logger.js';
+import { getUsername } from '../../shared/username.js';
 
+let myPeer;
+let myPeerId;
 const SIGNALING_SERVER = 'ws://localhost:9000';
 
-let peer;
-let myPeerId;
-let ws;
+const socket = new WebSocket(SIGNALING_SERVER);
+let socketReady = false;
 
-export async function initNetwork() {
-    logger.info('📡 Initializing PeerJS...');
+socket.addEventListener('open', () => {
+    logger.info('✅ Connected to signaling server');
+    socketReady = true;
     
-    return new Promise((resolve) => {
-        // Create PeerJS instance
-        peer = new Peer({
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478' }
-                ]
-            }
-        });
-        
-        peer.on('open', (id) => {
-            myPeerId = id;
-            logger.info(`✅ My peer ID: ${myPeerId}`);
-            
-            // Connect to signaling server for discovery
-            connectToSignalingServer();
-            
-            resolve();
-        });
-        
-        peer.on('connection', (conn) => {
-            logger.info(`📞 Incoming connection from: ${conn.peer}`);
-            peerManager.addIncomingConnection(conn);
-        });
-        
-        peer.on('error', (err) => {
-            logger.error('PeerJS error:', err);
-        });
-    });
-}
+    // If peer ID already exists, register now
+    if (myPeerId) {
+        registerWithServer();
+    }
+});
 
-function connectToSignalingServer() {
-    logger.info('🔗 Connecting to signaling server for peer discovery...');
-    
-    ws = new WebSocket(SIGNALING_SERVER);
-    
-    ws.onopen = () => {
-        logger.info('✅ Connected to signaling server');
-        
-        // Announce myself
-        ws.send(JSON.stringify({
-            type: 'announce',
+socket.addEventListener('message', async (event) => {
+    const message = JSON.parse(event.data);
+
+    if (message.type === 'peers') {
+        const peerList = message.peers.filter(p => p !== myPeerId);
+        logger.info(`📋 Discovered ${peerList.length} peers from signaling server`);
+
+        peerList.forEach(peerId => {
+            connectToPeer(peerId);
+        });
+    }
+});
+
+socket.addEventListener('error', (error) => {
+    logger.error('Signaling server error:', error);
+});
+
+function registerWithServer() {
+    if (socketReady && myPeerId) {
+        console.log('📤 Registering with server, peerId:', myPeerId);
+        socket.send(JSON.stringify({
+            type: 'register',
             peerId: myPeerId
         }));
-    };
+        logger.info('🔗 Registered with signaling server');
+    }
+}
+
+myPeer = new Peer({
+    config: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+    }
+});
+
+myPeer.on('open', (id) => {
+    myPeerId = id;
+    logger.info(`✅ My peer ID: ${id}`);
     
-    ws.onmessage = (event) => {
-        try {
-            const message = JSON.parse(event.data);
-            handleSignalingMessage(message);
-        } catch (error) {
-            logger.error('Failed to parse signaling message:', error);
+    // Register if socket is already open
+    registerWithServer();
+});
+
+myPeer.on('connection', (conn) => {
+    peerManager.addPeer(conn);
+});
+
+myPeer.on('error', (err) => {
+    logger.error('PeerJS error:', err);
+});
+
+export function connectToPeer(peerId) {
+    if (peerManager.hasPeer(peerId)) {
+        const shortId = peerId.split('-')[0];
+        logger.info(`✅✅ Connection already open: ${peerId}`);
+        return;
+    }
+
+    const shortId = peerId.split('-')[0];
+    logger.info(`🔗 Connecting to peer: ${shortId}`);
+
+    const conn = myPeer.connect(peerId, {
+        reliable: true
+    });
+
+    conn.on('open', async () => {
+        logger.info(`✅ Outgoing connection established: ${peerId}`);
+        peerManager.peers.set(peerId, conn);
+        peerManager.peerIds.add(shortId);
+        peerManager.updatePeerCount();
+        
+        // SEND HANDSHAKE ON OUTGOING CONNECTION
+        const myUsername = getUsername();
+        console.log('🤝 SENDING handshake (outgoing):', myUsername, 'to peer:', shortId);
+        conn.send({
+            type: 'handshake',
+            username: myUsername
+        });
+        
+        peerManager.setupPeerListeners(conn);
+
+        contentDHT.announceAll();
+    });
+
+    conn.on('error', (err) => {
+        logger.error(`Connection error with ${peerId}:`, err);
+    });
+
+    conn.on('close', async () => {
+        logger.warn(`❌ Connection closed: ${peerId}`);
+        
+        // Mark user as offline
+        const { presenceManager } = await import('./presence.js');
+        const username = presenceManager.getUserByPeerId(peerId);
+        if (username) {
+            presenceManager.setOffline(username);
         }
-    };
-    
-    ws.onerror = (error) => {
-        logger.error('WebSocket error:', error);
-    };
-    
-    ws.onclose = () => {
-        logger.warn('❌ Disconnected from signaling server');
-        setTimeout(() => {
-            logger.info('🔄 Reconnecting...');
-            connectToSignalingServer();
-        }, 3000);
-    };
-}
-
-function handleSignalingMessage(message) {
-    switch (message.type) {
-        case 'peers':
-            // Got list of all peers in the network
-            const otherPeers = message.peers.filter(id => id !== myPeerId);
-            logger.info(`📋 Discovered ${otherPeers.length} peers from signaling server`);
-            
-            // Auto-connect to all peers
-            otherPeers.forEach(peerId => {
-                if (!peerManager.hasPeer(peerId)) {
-                    connectToPeer(peerId);
-                }
-            });
-            break;
-    }
-}
-
-export function connectToPeer(remotePeerId) {
-    if (remotePeerId === myPeerId) {
-        logger.warn('Cannot connect to yourself!');
-        return;
-    }
-    
-    if (peerManager.hasPeer(remotePeerId)) {
-        logger.info(`Already connected to ${remotePeerId.slice(0, 8)}`);
-        return;
-    }
-    
-    logger.info(`🔗 Connecting to peer: ${remotePeerId.slice(0, 8)}`);
-    const conn = peer.connect(remotePeerId, { reliable: true });
-    peerManager.addOutgoingConnection(conn);
+        
+        peerManager.peers.delete(peerId);
+        peerManager.peerIds.delete(shortId);
+        peerManager.updatePeerCount();
+    });
 }
 
 export function getMyPeerId() {
     return myPeerId;
-}
-
-export function getPeer() {
-    return peer;
 }

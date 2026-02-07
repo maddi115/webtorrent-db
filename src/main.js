@@ -1,63 +1,44 @@
-// main.js - Initialize with WebTorrent
-import './style.css';
-import { initDB, reannounceAllEntries } from './browser/storage/db.js';
-import { initNetwork } from './browser/network/dht.js';
+// main.js - Use correct initDB export
+import './browser/network/dht.js';
 import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
-import { initUsernameUI } from './browser/ui/username.js';
+import { initDB } from './browser/storage/db.js';
 import { initWASM } from './browser/wasm/wasmLoader.js';
 import { gossipBinary } from './browser/network/gossipBinary.js';
 import { downloadManager } from './browser/downloads/downloadManager.js';
+import { presenceManager } from './browser/network/presence.js';
 import { logger } from './shared/logger.js';
+import { getUsername } from './shared/username.js';
 
-initUsernameUI();
-
-const loadingIndicator = document.createElement('div');
-loadingIndicator.id = 'loading-indicator';
-loadingIndicator.innerHTML = `
-    <div class="loading-content">
-        <div class="spinner"></div>
-        <p>🔄 Loading WASM modules...</p>
-    </div>
-`;
-document.body.appendChild(loadingIndicator);
-
-(async () => {
-    try {
-        logger.info('🚀 Initializing WebTorrent P2P DB...');
-        
-        await initWASM();
-        await gossipBinary.init();
-        
-        // Initialize WebTorrent
-        downloadManager.init();
-        
-        loadingIndicator.querySelector('p').textContent = '🔄 Connecting to network...';
-        
-        await initDB();
-        logger.info('✅ Storage initialized');
-        
-        await initNetwork();
-        logger.info('✅ Network initialized');
-        
-        setTimeout(async () => {
-            await reannounceAllEntries();
-        }, 2000);
-        
-        initUI();
-        initAddEntry();
-        logger.info('✅ UI ready');
-        
-        loadingIndicator.classList.add('fade-out');
-        setTimeout(() => loadingIndicator.remove(), 500);
-        
-        logger.info('🎉 Browser node ready with WebTorrent streaming!');
-    } catch (error) {
-        logger.error('❌ Failed to initialize:', error);
-        loadingIndicator.innerHTML = `
-            <div class="loading-content">
-                <p>❌ Failed to connect</p>
-            </div>
-        `;
+async function init() {
+    logger.info('🚀 Initializing WebTorrent P2P DB...');
+    
+    logger.info('🔧 Initializing WASM modules...');
+    await initWASM();
+    
+    await gossipBinary.init();
+    await downloadManager.init();
+    
+    await initDB();
+    logger.info('✅ Storage initialized');
+    
+    // DHT auto-initializes on import
+    logger.info('✅ Network initialized');
+    
+    // Initialize presence - mark self as online
+    presenceManager.init();
+    
+    initUI();
+    initAddEntry();
+    
+    const username = getUsername();
+    const usernameDisplay = document.getElementById('username-display');
+    if (usernameDisplay) {
+        usernameDisplay.textContent = username;
     }
-})();
+    
+    logger.info('✅ UI ready');
+    logger.info('🎉 Browser node ready with WebTorrent streaming!');
+}
+
+init();

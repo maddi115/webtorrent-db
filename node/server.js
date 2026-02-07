@@ -1,4 +1,4 @@
-// server.js - Fixed to use actual PeerJS IDs
+// server.js - Fixed to listen for 'register'
 import { WebSocketServer } from 'ws';
 import http from 'http';
 
@@ -15,8 +15,7 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
-
-const peers = new Map(); // Map<actualPeerId, WebSocket>
+const peers = new Map();
 
 wss.on('connection', (ws) => {
     let peerId = null;
@@ -25,8 +24,9 @@ wss.on('connection', (ws) => {
         try {
             const message = JSON.parse(data.toString());
             
-            if (message.type === 'announce') {
-                peerId = message.peerId; // Use ACTUAL PeerJS ID
+            // FIXED: Listen for 'register' not 'announce'
+            if (message.type === 'register') {
+                peerId = message.peerId;
                 peers.set(peerId, ws);
                 console.log(`✅ Peer joined: ${peerId.slice(0, 12)}... (Total: ${peers.size})`);
                 

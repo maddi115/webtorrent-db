@@ -1,164 +1,182 @@
-// peerManager.js - Pass preview separately
-import { PeerConnection } from './transport.js';
-import { contentDHT } from './contentDHT.js';
-import { getMyPeerId } from './dht.js';
-import { getAllEntries } from '../storage/db.js';
-import { extractSlug } from '../../shared/urlParser.js';
-import { gossipBinary } from './gossipBinary.js';
+// peerManager.js - WITH DEBUG LOGGING
 import { logger } from '../../shared/logger.js';
+import { gossipBinary } from './gossipBinary.js';
+import { contentDHT } from './contentDHT.js';
+import { presenceManager } from './presence.js';
+import { getUsername } from '../../shared/username.js';
 
-export class PeerManager {
+class PeerManager {
     constructor() {
         this.peers = new Map();
+        this.peerIds = new Set();
     }
-    
-    addIncomingConnection(conn) {
-        const peerId = conn.peer;
-        
-        conn.on('open', () => {
-            logger.info(`✅ Incoming connection established: ${peerId}`);
-            this.createPeerConnection(peerId, conn);
-        });
-    }
-    
-    addOutgoingConnection(conn) {
-        const peerId = conn.peer;
-        
-        conn.on('open', () => {
-            logger.info(`✅ Outgoing connection established: ${peerId}`);
-            this.createPeerConnection(peerId, conn);
-        });
-    }
-    
-    createPeerConnection(peerId, conn) {
-        if (this.peers.has(peerId)) {
-            return;
-        }
-        
-        const peerConnection = new PeerConnection(peerId, (data) => {
-            this.handlePeerData(data, peerId);
-        });
-        
-        peerConnection.setConnection(conn);
-        this.peers.set(peerId, peerConnection);
-        this.updatePeerCount();
-        
-        conn.on('close', () => {
-            this.removePeer(peerId);
-        });
-        
-        setTimeout(() => {
-            this.shareMyContentIndex(peerConnection);
-        }, 1500);
-    }
-    
-    shareMyContentIndex(peerConnection) {
-        const myContent = contentDHT.getMyContent();
-        const myPeerId = getMyPeerId();
-        
-        if (!myPeerId || !peerConnection.connected) {
-            return;
-        }
-        
-        if (myContent.length > 0) {
-            logger.info(`📤 Sharing ${myContent.length} content announcements with ${peerConnection.peerId.slice(0, 8)}`);
+
+    addPeer(connection) {
+        const shortId = connection.peer.split('-')[0];
+        logger.info(`📞 Incoming connection from: ${connection.peer}`);
+
+        connection.on('open', () => {
+            logger.info(`✅ Incoming connection established: ${connection.peer}`);
+            this.peers.set(connection.peer, connection);
+            this.peerIds.add(shortId);
+            this.updatePeerCount();
             
-            myContent.forEach(contentId => {
-                peerConnection.send({
-                    type: 'announce',
-                    contentId,
-                    peerId: myPeerId
-                });
+            // Send username handshake
+            const myUsername = getUsername();
+            console.log('🤝 SENDING handshake (incoming):', myUsername, 'to peer:', shortId);
+            connection.send({
+                type: 'handshake',
+                username: myUsername
             });
-        }
+            
+            this.setupPeerListeners(connection);
+        });
+
+        connection.on('error', (err) => {
+            logger.error('Connection error:', err);
+        });
+
+        connection.on('close', () => {
+            logger.warn(`❌ Connection closed: ${connection.peer}`);
+            
+            // Mark user as offline
+            const username = presenceManager.getUserByPeerId(connection.peer);
+            if (username) {
+                console.log('⚪ MARKING OFFLINE:', username, 'peerId:', connection.peer);
+                presenceManager.setOffline(username);
+            }
+            
+            this.peers.delete(connection.peer);
+            this.peerIds.delete(shortId);
+            this.updatePeerCount();
+            logger.info(`Removed peer: ${connection.peer}`);
+        });
     }
-    
-    async handlePeerData(data, fromPeerId) {
-        logger.info('🎯 Received data, type:', data.type);
-        
+
+    setupPeerListeners(connection) {
+        connection.on('data', (data) => {
+            this.handlePeerData(data, connection);
+        });
+    }
+
+    handlePeerData(data, connection) {
+        logger.info(`🎯 Received data, type: ${data.type}`);
+
         switch (data.type) {
-            case 'entry_binary':
-                const entry = gossipBinary.deserializeBinary(data.binary, data.preview);
-                if (entry) {
-                    await gossipBinary.receiveEntry(entry, true);
+            case 'handshake':
+                // Store username -> peerId mapping
+                if (data.username) {
+                    console.log('🤝 RECEIVED handshake from:', data.username, 'peerId:', connection.peer);
+                    presenceManager.setOnline(data.username, connection.peer);
+                } else {
+                    console.warn('⚠️ Handshake missing username!', data);
                 }
                 break;
                 
-            case 'entry':
-                await gossipBinary.receiveEntry(data.entry, false);
-                break;
-                
             case 'announce':
-                contentDHT.handleAnnouncement(data.contentId, data.peerId);
+                if (data.contentId) {
+                    const shortId = connection.peer.split('-')[0];
+                    logger.info(`📥 Peer ${shortId} has: ${data.contentId}`);
+                    contentDHT.addPeer(data.contentId, connection.peer);
+                    
+                    // Update last seen
+                    const username = presenceManager.getUserByPeerId(connection.peer);
+                    if (username) {
+                        presenceManager.updateLastSeen(username);
+                    }
+                }
                 break;
-                
+
             case 'query':
-                contentDHT.handleQuery(data.contentId, data.requesterId);
+                if (data.contentId) {
+                    const hasContent = contentDHT.hasContent(data.contentId);
+                    if (hasContent) {
+                        const shortId = connection.peer.split('-')[0];
+                        logger.info(`✅ I have ${data.contentId}, telling ${shortId}`);
+                        connection.send({
+                            type: 'announce',
+                            contentId: data.contentId
+                        });
+                    }
+                }
                 break;
-                
+
             case 'request_entry':
-                await this.handleEntryRequest(data.contentId, fromPeerId);
+                this.handleEntryRequest(data.contentId, connection);
+                break;
+
+            case 'entry':
+                this.handleEntryReceived(data.entry, connection);
+                break;
+
+            case 'entry_binary':
+                this.handleBinaryEntryReceived(data, connection);
                 break;
         }
     }
-    
-    async handleEntryRequest(contentId, requesterId) {
-        logger.info(`📤 Peer ${requesterId.slice(0, 8)} requested: ${contentId}`);
-        
+
+    async handleEntryRequest(contentId, connection) {
+        const shortId = connection.peer.split('-')[0];
+        logger.info(`📤 Peer ${shortId} requested: ${contentId}`);
+
+        const { getAllEntries } = await import('../storage/db.js');
+        const { extractSlug } = await import('../../shared/urlParser.js');
+
         const allEntries = await getAllEntries();
-        const entry = allEntries.find(e => extractSlug(e.sourceURL) === contentId);
-        
-        if (entry) {
-            const peer = this.getPeer(requesterId);
-            if (peer && peer.connected) {
-                logger.info(`✅ Sending entry to ${requesterId.slice(0, 8)}`);
-                peer.send({
-                    type: 'entry',
-                    entry
-                });
-            }
+        const matchingEntry = allEntries.find(e => {
+            const slug = extractSlug(e.sourceURL);
+            return slug === contentId;
+        });
+
+        if (matchingEntry) {
+            logger.info(`✅ Sending entry to ${shortId}`);
+            connection.send({
+                type: 'entry',
+                entry: matchingEntry
+            });
         }
     }
-    
-    getPeer(peerId) {
-        return this.peers.get(peerId);
+
+    async handleEntryReceived(entry, connection) {
+        await gossipBinary.receiveEntry(entry, false);
     }
-    
+
+    async handleBinaryEntryReceived(data, connection) {
+        const entry = gossipBinary.deserializeBinary(data.binary, data.preview);
+        if (entry) {
+            await gossipBinary.receiveEntry(entry, true);
+        }
+    }
+
+    broadcast(message) {
+        this.peers.forEach((peer, peerId) => {
+            if (peer.open) {
+                const shortId = peerId.split('-')[0];
+                logger.info(`📤 Sending to ${peerId}: ${message.type}`);
+                peer.send(message);
+            }
+        });
+    }
+
+    sendTo(peerId, message) {
+        const peer = this.peers.get(peerId);
+        if (peer && peer.open) {
+            peer.send(message);
+        }
+    }
+
     hasPeer(peerId) {
         return this.peers.has(peerId);
     }
-    
-    removePeer(peerId) {
-        const connection = this.peers.get(peerId);
-        if (connection) {
-            connection.destroy();
-            this.peers.delete(peerId);
-            this.updatePeerCount();
-            logger.info(`Removed peer: ${peerId}`);
-        }
+
+    getPeer(peerId) {
+        return this.peers.get(peerId);
     }
-    
-    getAllPeers() {
-        return Array.from(this.peers.values());
-    }
-    
-    getConnectedPeers() {
-        return this.getAllPeers().filter(p => p.connected);
-    }
-    
-    broadcast(message) {
-        const connected = this.getConnectedPeers();
-        connected.forEach(peer => {
-            peer.send(message);
-        });
-    }
-    
+
     updatePeerCount() {
+        const count = this.peers.size;
         const countEl = document.getElementById('peer-count');
-        if (countEl) {
-            const connected = this.getConnectedPeers().length;
-            countEl.textContent = connected;
-        }
+        if (countEl) countEl.textContent = count;
     }
 }
 

@@ -1,106 +1,64 @@
-// contentDHT.js - Content-based peer discovery
-import { getMyPeerId, getPeer } from './dht.js';
-import { peerManager } from './peerManager.js';
+// contentDHT.js - Track which peers have which content
 import { logger } from '../../shared/logger.js';
+import { peerManager } from './peerManager.js';
+import { extractSlug } from '../../shared/urlParser.js';
 
 class ContentDHT {
     constructor() {
-        // Map: contentId -> Set of peer IDs who have it
-        this.contentIndex = new Map();
-        
-        // Map: my contentIds that I'm announcing
-        this.myContent = new Set();
+        this.contentToPeers = new Map();
     }
-    
-    // Announce that I have this content
-    announceContent(contentId) {
-        this.myContent.add(contentId);
-        
-        const myPeerId = getMyPeerId();
-        if (!this.contentIndex.has(contentId)) {
-            this.contentIndex.set(contentId, new Set());
+
+    addPeer(contentId, peerId) {
+        if (!this.contentToPeers.has(contentId)) {
+            this.contentToPeers.set(contentId, new Set());
         }
-        this.contentIndex.get(contentId).add(myPeerId);
-        
-        logger.info(`📢 Announcing content: ${contentId}`);
-        
-        // Broadcast announcement to all peers
-        this.broadcastAnnouncement(contentId);
+        this.contentToPeers.get(contentId).add(peerId);
     }
-    
-    broadcastAnnouncement(contentId) {
-        peerManager.broadcast({
-            type: 'announce',
-            contentId,
-            peerId: getMyPeerId()
+
+    removePeer(peerId) {
+        this.contentToPeers.forEach((peers, contentId) => {
+            peers.delete(peerId);
+            if (peers.size === 0) {
+                this.contentToPeers.delete(contentId);
+            }
         });
     }
-    
-    // Receive announcement from peer
-    handleAnnouncement(contentId, peerId) {
-        if (!this.contentIndex.has(contentId)) {
-            this.contentIndex.set(contentId, new Set());
-        }
-        
-        this.contentIndex.get(contentId).add(peerId);
-        logger.info(`📥 Peer ${peerId.slice(0, 8)} has: ${contentId}`);
-    }
-    
-    // Find peers who have this content
+
     findPeers(contentId) {
-        const peers = this.contentIndex.get(contentId);
-        if (!peers || peers.size === 0) {
-            logger.info(`🔍 No peers found for: ${contentId}`);
-            return [];
-        }
-        
-        logger.info(`✅ Found ${peers.size} peers with: ${contentId}`);
-        return Array.from(peers);
+        return Array.from(this.contentToPeers.get(contentId) || []);
     }
-    
-    // Query: ask all connected peers if they have content
+
     queryContent(contentId) {
         logger.info(`🔍 Querying peers for: ${contentId}`);
-        
         peerManager.broadcast({
             type: 'query',
-            contentId,
-            requesterId: getMyPeerId()
+            contentId: contentId
         });
     }
-    
-    // Handle query from peer
-    handleQuery(contentId, requesterId) {
-        if (this.myContent.has(contentId)) {
-            logger.info(`✅ I have ${contentId}, telling ${requesterId.slice(0, 8)}`);
-            
-            // Tell requester I have it
-            const peer = peerManager.getPeer(requesterId);
-            if (peer) {
-                peer.send({
-                    type: 'announce',
-                    contentId,
-                    peerId: getMyPeerId()
-                });
-            }
-        }
+
+    hasContent(contentId) {
+        return this.contentToPeers.has(contentId) && this.contentToPeers.get(contentId).size > 0;
     }
-    
-    // Get all my announced content
-    getMyContent() {
-        return Array.from(this.myContent);
+
+    async announceAll() {
+        const { getAllEntries } = await import('../storage/db.js');
+        const entries = await getAllEntries();
+        
+        entries.forEach(entry => {
+            const slug = extractSlug(entry.sourceURL);
+            peerManager.broadcast({
+                type: 'announce',
+                contentId: slug
+            });
+        });
     }
-    
-    // Get stats
-    getStats() {
-        return {
-            totalContent: this.contentIndex.size,
-            myContent: this.myContent.size,
-            totalPeers: new Set(
-                Array.from(this.contentIndex.values())
-                    .flatMap(peers => Array.from(peers))
-            ).size
-        };
+
+    announceContent(contentId) {
+        logger.info(`📢 Announcing content: ${contentId}`);
+        peerManager.broadcast({
+            type: 'announce',
+            contentId: contentId
+        });
     }
 }
 

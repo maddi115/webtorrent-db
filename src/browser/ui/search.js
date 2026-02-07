@@ -1,7 +1,8 @@
-// search.js - Thread pagination (8 per page)
+// search.js - With online/offline status
 import { searchEntries, getAllEntries, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
+import { presenceManager } from '../network/presence.js';
 import { connectToPeer } from '../network/dht.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
@@ -11,7 +12,7 @@ let searchTimeout;
 const paginationState = {};
 const downloadStates = {};
 const threadStates = {};
-const threadPageStates = {}; // Track page per thread
+const threadPageStates = {};
 const PEERS_PER_PAGE = 13;
 const THREAD_ENTRIES_PER_PAGE = 8;
 
@@ -216,7 +217,6 @@ function createPeerThread(urlId, username, items) {
     const threadId = `thread-${urlId}-${createSafeId(username)}`;
     const isExpanded = threadStates[threadId] || false;
     
-    // Initialize thread page
     if (!threadPageStates[threadId]) {
         threadPageStates[threadId] = 1;
     }
@@ -224,13 +224,16 @@ function createPeerThread(urlId, username, items) {
     const currentThreadPage = threadPageStates[threadId];
     const totalThreadPages = Math.ceil(items.length / THREAD_ENTRIES_PER_PAGE);
     
-    // Paginate thread entries
     const threadStart = (currentThreadPage - 1) * THREAD_ENTRIES_PER_PAGE;
     const threadEnd = threadStart + THREAD_ENTRIES_PER_PAGE;
     const paginatedItems = items.slice(threadStart, threadEnd);
     
     const startNum = threadStart + 1;
     const endNum = Math.min(threadEnd, items.length);
+    
+    // Check online status
+    const isOnline = presenceManager.isOnline(username);
+    const lastSeen = presenceManager.getLastSeen(username);
     
     const threadEntries = paginatedItems.map(({ entry, globalIndex }) => {
         const hasMagnet = entry.magnet && entry.magnet.trim();
@@ -279,7 +282,14 @@ function createPeerThread(urlId, username, items) {
     return `
         <div class="peer-thread ${isExpanded ? 'expanded' : 'collapsed'}">
             <div class="thread-header" id="${threadId}-header">
-                <span class="username">${username} (${items.length} entries)</span>
+                <div class="thread-user-info">
+                    <span class="username">${username} (${items.length} entries)</span>
+                    ${isOnline ? 
+                        '<span class="status online">🟢 Online</span>' : 
+                        `<span class="status offline">⚪ Offline</span>`
+                    }
+                    ${!isOnline && lastSeen ? `<span class="last-seen">${lastSeen}</span>` : ''}
+                </div>
                 <button class="expand-btn" id="${threadId}-btn">
                     ${isExpanded ? 'Collapse ▲' : 'Expand ▼'}
                 </button>
@@ -303,9 +313,14 @@ function createPeerThread(urlId, username, items) {
 function createPeerCard(urlId, entry, globalIndex) {
     const hasMagnet = entry.magnet && entry.magnet.trim();
     const hasInstantIO = entry.instantIOLink && entry.instantIOLink.trim();
+    const username = entry.addedBy || 'Anonymous';
     
     const buttonId = `${urlId}-${globalIndex}`;
     const buttonState = downloadStates[buttonId] || 'idle';
+    
+    // Check online status
+    const isOnline = presenceManager.isOnline(username);
+    const lastSeen = presenceManager.getLastSeen(username);
     
     let buttons = '';
     
@@ -341,7 +356,14 @@ function createPeerCard(urlId, entry, globalIndex) {
     
     return `
         <div class="peer-card">
-            <span class="username">${entry.addedBy || 'Anonymous'}</span>
+            <div class="peer-card-header">
+                <span class="username">${username}</span>
+                ${isOnline ? 
+                    '<span class="status online">🟢 Online</span>' : 
+                    `<span class="status offline">⚪ Offline</span>`
+                }
+                ${!isOnline && lastSeen ? `<span class="last-seen">${lastSeen}</span>` : ''}
+            </div>
             <div class="peer-actions">
                 ${buttons}
             </div>
@@ -391,7 +413,6 @@ function setupEventListeners(url, entries) {
         }
     });
     
-    // Group entries by username for thread listeners
     const userGroups = {};
     entries.forEach(entry => {
         const username = entry.addedBy || 'Anonymous';
@@ -407,7 +428,6 @@ function setupEventListeners(url, entries) {
             const expandBtn = document.getElementById(`${threadId}-btn`);
             const entriesDiv = document.getElementById(`${threadId}-entries`);
             
-            // Expand/collapse listener
             if (expandBtn && entriesDiv) {
                 expandBtn.addEventListener('click', () => {
                     const isExpanded = threadStates[threadId] || false;
@@ -423,7 +443,6 @@ function setupEventListeners(url, entries) {
                 });
             }
             
-            // Thread pagination listeners
             const threadPrevBtn = document.getElementById(`thread-prev-${threadId}`);
             const threadNextBtn = document.getElementById(`thread-next-${threadId}`);
             
@@ -443,7 +462,6 @@ function setupEventListeners(url, entries) {
         }
     });
     
-    // Main pagination listeners
     const prevBtn = document.getElementById(`prev-${urlId}`);
     const nextBtn = document.getElementById(`next-${urlId}`);
     
