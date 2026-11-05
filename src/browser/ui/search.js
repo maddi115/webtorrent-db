@@ -1,77 +1,72 @@
-// search.js - With online/offline status
-import { searchEntries, trackSearch, getStats } from '../storage/db.js';
+// search.js - Search links and show them in a compact black table
+import { searchEntries, trackDownload, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
 import { extractSlug, isURL } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
-import { logger } from '../../shared/logger.js';
 import { escapeHTML, MAX_THUMB_CHARS, safeImage, safeLink, safeThumbHash } from '../../shared/safe.js';
 import { thumbHashToImage } from '../../shared/images.js';
 import { openPreview } from './preview.js';
 import { watchThumbnails } from './thumbnails.js';
 
-let searchTimeout;
-const paginationState = {};
-const downloadStates = {};
-const threadStates = {};
-const threadPageStates = {};
-const PEERS_PER_PAGE = 13;
-const THREAD_ENTRIES_PER_PAGE = 8;
+const ROWS_PER_PAGE = 20;
 const WHO_HAS_LIMIT = 50;
 const resultSlugs = new Map();
-let lastWhoHasKey = '';
+const downloadStates = new Map();
 
-function createSafeId(str) {
-    return str.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50);
-}
+let searchTimeout;
+let lastWhoHasKey = '';
+let currentResults = [];
+let currentPage = 1;
 
 export function initUI() {
     const searchInput = document.getElementById('search-input');
-    
-    searchInput.addEventListener('input', (e) => {
+    const container = document.getElementById('results-container');
+
+    searchInput.addEventListener('input', (event) => {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
-            performSearch(e.target.value.trim());
+            currentPage = 1;
+            performSearch(event.target.value.trim());
         }, 300);
     });
-    
-    searchInput.addEventListener('paste', (e) => {
+
+    searchInput.addEventListener('paste', () => {
         setTimeout(() => {
+            currentPage = 1;
             performSearch(searchInput.value.trim());
         }, 10);
     });
+
+    container.addEventListener('click', handleTableClick);
 }
 
 async function performSearch(query) {
-    const resultsContainer = document.getElementById('results-container');
-    
+    const container = document.getElementById('results-container');
+
     if (!query) {
-        resultsContainer.innerHTML = '';
+        currentResults = [];
+        container.replaceChildren();
         return;
     }
-    
+
     await trackSearch(query);
-    
-    let results = [];
-    
+
+    let results;
     if (isURL(query)) {
         const slug = extractSlug(query);
-        
         const matches = await searchEntries(slug);
-        results = matches.filter(e => 
-            e.sourceURL && (
-                e.sourceURL.includes(query) || 
-                extractSlug(e.sourceURL).includes(slug)
-            )
-        );
+        results = matches.filter((entry) => (
+            entry.sourceURL.includes(query) || extractSlug(entry.sourceURL).includes(slug)
+        ));
     } else {
         results = await searchEntries(query);
     }
-    
-    askWhoHas(results);
 
-    await displayResults(results, resultsContainer);
+    askWhoHas(results);
+    currentResults = results;
+    await renderResults();
 }
 
 // Asks once for what is on screen, so typing does not flood peers
@@ -98,426 +93,136 @@ window.addEventListener('peer-has-ids', ({ detail }) => {
     if (changed) refreshResults();
 });
 
-async function displayResults(results, container) {
-    if (!results.length) {
-        container.innerHTML = '<p style="color: hsl(0 0% 64%); font-size: 14px; padding: 16px; text-align: center;">No results found</p>';
-        return;
-    }
-    
-    const grouped = groupByURL(results);
-    
-    const cards = await Promise.all(
-        Object.entries(grouped).map(([url, entries]) => createURLMatchCard(url, entries))
-    );
-    
-    container.innerHTML = cards.join('');
-    watchThumbnails(container);
-    
-    Object.entries(grouped).forEach(([url, entries]) => {
-        setupEventListeners(url, entries);
-    });
-}
-
-function groupByURL(results) {
-    const grouped = {};
-    
-    results.forEach(entry => {
-        if (!entry.sourceURL) return;
-        
-        if (!grouped[entry.sourceURL]) {
-            grouped[entry.sourceURL] = [];
-        }
-        grouped[entry.sourceURL].push(entry);
-    });
-    
-    return grouped;
-}
-
-async function createURLMatchCard(url, entries) {
-    if (!entries.length) return '';
-    
-    const firstEntry = entries[0];
-    const slug = extractSlug(url);
-    const peersOnline = contentDHT.findPeers(slug).length;
-    const stats = await getStats(slug);
-    
-    let hostname = url;
+function getHostname(url) {
     try {
-        const urlObj = new URL(url);
-        hostname = urlObj.hostname;
-    } catch (e) {
-        hostname = url.substring(0, 40) + '...';
+        return new URL(url).hostname;
+    } catch {
+        return url.slice(0, 40);
     }
-    
-    const urlId = createSafeId(url);
-    const thumb = safeImage(firstEntry.thumb, MAX_THUMB_CHARS);
-    const thumbHash = safeThumbHash(firstEntry.thumbHash);
+}
+
+function renderImage(entry) {
+    const thumb = safeImage(entry.thumb, MAX_THUMB_CHARS);
+    const thumbHash = safeThumbHash(entry.thumbHash);
     const blurred = !thumb && thumbHash ? thumbHashToImage(thumbHash) : null;
     const image = thumb || blurred;
-    
-    if (!paginationState[urlId]) {
-        paginationState[urlId] = 1;
+
+    if (!image) return '<span class="result-no-image" aria-hidden="true">📄</span>';
+
+    return `<button class="result-image-button" type="button" data-action="preview" data-entry-id="${escapeHTML(entry.entryId)}" aria-label="Open full image">
+        <img class="preview-thumb" src="${image}" data-entry-id="${escapeHTML(entry.entryId)}" ${blurred ? 'data-needs-thumb="true"' : ''} alt="">
+    </button>`;
+}
+
+function renderActions(entry) {
+    const id = escapeHTML(entry.entryId);
+    const state = downloadStates.get(entry.entryId) || 'idle';
+    const buttons = [];
+
+    if (entry.magnet) {
+        const label = { idle: 'Download', downloading: 'Downloading', downloaded: 'Downloaded' }[state];
+        buttons.push(`<button type="button" data-action="copy" data-entry-id="${id}">Copy</button>`);
+        buttons.push(`<button type="button" data-action="download" data-entry-id="${id}" ${state === 'idle' ? '' : 'disabled'}>${label}</button>`);
     }
-    
-    const totalPages = Math.ceil(entries.length / PEERS_PER_PAGE);
-    const currentPage = paginationState[urlId];
-    
-    return `
-        <div class="url-match-card">
-            <div class="url-match-summary">
-                <div class="url-preview">
-                    ${image ? 
-                        `<img id="preview-${urlId}" class="preview-thumb" src="${image}" data-entry-id="${escapeHTML(firstEntry.entryId)}" ${blurred ? 'data-needs-thumb="true"' : ''} alt="Preview">` : 
-                        '<div class="no-preview-large">📄</div>'
-                    }
-                </div>
-                <div class="url-info">
-                    <h3 class="url-title">${escapeHTML(firstEntry.title || 'Untitled')}</h3>
-                    <a href="${escapeHTML(safeLink(url))}" target="_blank" rel="noopener noreferrer" class="url-source">${escapeHTML(hostname)}</a>
-                    <div class="url-stats">
-                        <span class="stat">👥 ${peersOnline} peer${peersOnline !== 1 ? 's' : ''} online</span>
-                        <span class="stat">📥 ${stats.downloads} download${stats.downloads !== 1 ? 's' : ''}</span>
-                        <span class="stat">🔍 ${stats.searches} search${stats.searches !== 1 ? 'es' : ''}</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="peer-list-section">
-                <div class="peer-list-header">
-                    <h4 class="peer-list-title">Peers who have this: ${currentPage}/${totalPages}</h4>
-                    ${totalPages > 1 ? `
-                        <div class="pagination-controls">
-                            <button class="page-btn" id="prev-${urlId}" ${currentPage === 1 ? 'disabled' : ''}>‹ Prev</button>
-                            <button class="page-btn" id="next-${urlId}" ${currentPage === totalPages ? 'disabled' : ''}>Next ›</button>
-                        </div>
-                    ` : ''}
-                </div>
-                <div class="peer-list" id="peer-list-${urlId}">
-                    ${renderPeerPage(urlId, entries, currentPage)}
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-function renderPeerPage(urlId, entries, page) {
-    const start = (page - 1) * PEERS_PER_PAGE;
-    const end = start + PEERS_PER_PAGE;
-    const pageEntries = entries.slice(start, end);
-    
-    const userGroups = {};
-    pageEntries.forEach((entry, index) => {
-        const username = entry.addedBy || 'Anonymous';
-        if (!userGroups[username]) {
-            userGroups[username] = [];
-        }
-        userGroups[username].push({ entry, globalIndex: start + index });
-    });
-    
-    return Object.entries(userGroups).map(([username, items]) => {
-        if (items.length > 1) {
-            return createPeerThread(urlId, username, items);
-        } else {
-            return createPeerCard(urlId, items[0].entry, items[0].globalIndex);
-        }
-    }).join('');
-}
-
-function createPeerThread(urlId, username, items) {
-    const threadId = `thread-${urlId}-${createSafeId(username)}`;
-    const isExpanded = threadStates[threadId] || false;
-    
-    if (!threadPageStates[threadId]) {
-        threadPageStates[threadId] = 1;
+    if (entry.instantIOLink) {
+        buttons.push(`<a href="${escapeHTML(safeLink(entry.instantIOLink))}" target="_blank" rel="noopener noreferrer">instant.io</a>`);
     }
-    
-    const currentThreadPage = threadPageStates[threadId];
-    const totalThreadPages = Math.ceil(items.length / THREAD_ENTRIES_PER_PAGE);
-    
-    const threadStart = (currentThreadPage - 1) * THREAD_ENTRIES_PER_PAGE;
-    const threadEnd = threadStart + THREAD_ENTRIES_PER_PAGE;
-    const paginatedItems = items.slice(threadStart, threadEnd);
-    
-    const startNum = threadStart + 1;
-    const endNum = Math.min(threadEnd, items.length);
-    
-    // Check online status
-    const isOnline = presenceManager.isOnline(username);
-    const lastSeen = presenceManager.getLastSeen(username);
-    
-    const threadEntries = paginatedItems.map(({ entry, globalIndex }) => {
-        const hasMagnet = entry.magnet && entry.magnet.trim();
-        const hasInstantIO = entry.instantIOLink && entry.instantIOLink.trim();
-        
-        const buttonId = `${urlId}-${globalIndex}`;
-        const buttonState = downloadStates[buttonId] || 'idle';
-        
-        let buttons = '';
-        
-        if (hasMagnet) {
-            let buttonText = 'Download';
-            let buttonClass = 'download-btn';
-            let disabled = '';
-            
-            if (buttonState === 'downloading') {
-                buttonText = 'Downloading';
-                disabled = 'disabled';
-            } else if (buttonState === 'downloaded') {
-                buttonText = 'Downloaded';
-                buttonClass = 'downloaded-btn';
-                disabled = 'disabled';
-            }
-            
-            buttons += `
-                <button id="copy-${urlId}-${globalIndex}">Copy Magnet</button>
-                <button id="download-${urlId}-${globalIndex}" class="${buttonClass}" ${disabled}>${buttonText}</button>
-            `;
-        }
-        
-        if (hasInstantIO) {
-            buttons += `
-                <a href="${escapeHTML(safeLink(entry.instantIOLink))}" target="_blank" rel="noopener noreferrer" class="instantio-btn">instant.io ↗</a>
-            `;
-        }
-        
-        return `
-            <div class="thread-entry">
-                <div class="peer-actions">
-                    ${buttons || '<span style="color: hsl(0 0% 64%); font-size: 12px;">No link</span>'}
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    return `
-        <div class="peer-thread ${isExpanded ? 'expanded' : 'collapsed'}">
-            <div class="thread-header" id="${threadId}-header">
-                <div class="thread-user-info">
-                    <span class="username">${escapeHTML(username)} (${items.length} entries)</span>
-                    ${isOnline ? 
-                        '<span class="status online">🟢 Online</span>' : 
-                        `<span class="status offline">⚪ Offline</span>`
-                    }
-                    ${!isOnline && lastSeen ? `<span class="last-seen">${lastSeen}</span>` : ''}
-                </div>
-                <button class="expand-btn" id="${threadId}-btn">
-                    ${isExpanded ? 'Collapse ▲' : 'Expand ▼'}
-                </button>
-            </div>
-            <div class="thread-entries" id="${threadId}-entries" style="${isExpanded ? '' : 'display: none;'}">
-                ${totalThreadPages > 1 ? `
-                    <div class="thread-pagination">
-                        <span class="thread-page-info">Showing ${startNum}-${endNum} of ${items.length}</span>
-                        <div class="pagination-controls">
-                            <button class="page-btn" id="thread-prev-${threadId}" ${currentThreadPage === 1 ? 'disabled' : ''}>‹ Prev</button>
-                            <button class="page-btn" id="thread-next-${threadId}" ${currentThreadPage === totalThreadPages ? 'disabled' : ''}>Next ›</button>
-                        </div>
-                    </div>
-                ` : ''}
-                ${threadEntries}
-            </div>
-        </div>
-    `;
+
+    return buttons.join('') || '<span class="result-muted">No link</span>';
 }
 
-function createPeerCard(urlId, entry, globalIndex) {
-    const hasMagnet = entry.magnet && entry.magnet.trim();
-    const hasInstantIO = entry.instantIOLink && entry.instantIOLink.trim();
+async function renderRow(entry) {
+    const slug = extractSlug(entry.sourceURL);
+    const stats = await getStats(slug);
+    const peers = contentDHT.findPeers(slug).length;
     const username = entry.addedBy || 'Anonymous';
-    
-    const buttonId = `${urlId}-${globalIndex}`;
-    const buttonState = downloadStates[buttonId] || 'idle';
-    
-    // Check online status
-    const isOnline = presenceManager.isOnline(username);
-    const lastSeen = presenceManager.getLastSeen(username);
-    
-    let buttons = '';
-    
-    if (hasMagnet) {
-        let buttonText = 'Download';
-        let buttonClass = 'download-btn';
-        let disabled = '';
-        
-        if (buttonState === 'downloading') {
-            buttonText = 'Downloading';
-            disabled = 'disabled';
-        } else if (buttonState === 'downloaded') {
-            buttonText = 'Downloaded';
-            buttonClass = 'downloaded-btn';
-            disabled = 'disabled';
-        }
-        
-        buttons += `
-            <button id="copy-${urlId}-${globalIndex}">Copy Magnet</button>
-            <button id="download-${urlId}-${globalIndex}" class="${buttonClass}" ${disabled}>${buttonText}</button>
-        `;
+    const online = presenceManager.isOnline(username);
+
+    return `<tr>
+        <td class="result-image">${renderImage(entry)}</td>
+        <td class="result-title-cell">
+            <a class="url-title" href="${escapeHTML(safeLink(entry.sourceURL))}" target="_blank" rel="noopener noreferrer">${escapeHTML(entry.title || 'Untitled')}</a>
+            <span class="result-host">${escapeHTML(getHostname(entry.sourceURL))}</span>
+        </td>
+        <td class="result-user"><span class="result-dot ${online ? 'online' : ''}" aria-label="${online ? 'Online' : 'Offline'}"></span>${escapeHTML(username)}</td>
+        <td class="result-number">${peers}</td>
+        <td class="result-number">${stats.downloads}</td>
+        <td class="result-actions">${renderActions(entry)}</td>
+    </tr>`;
+}
+
+async function renderResults() {
+    const container = document.getElementById('results-container');
+
+    if (!currentResults.length) {
+        container.innerHTML = '<p class="results-empty">No results found</p>';
+        return;
     }
-    
-    if (hasInstantIO) {
-        buttons += `
-            <a href="${escapeHTML(safeLink(entry.instantIOLink))}" target="_blank" rel="noopener noreferrer" class="instantio-btn">instant.io ↗</a>
-        `;
-    }
-    
-    if (!hasMagnet && !hasInstantIO) {
-        buttons = '<span style="color: hsl(0 0% 64%); font-size: 12px;">No link provided</span>';
-    }
-    
-    return `
-        <div class="peer-card">
-            <div class="peer-card-header">
-                <span class="username">${escapeHTML(username)}</span>
-                ${isOnline ? 
-                    '<span class="status online">🟢 Online</span>' : 
-                    `<span class="status offline">⚪ Offline</span>`
-                }
-                ${!isOnline && lastSeen ? `<span class="last-seen">${lastSeen}</span>` : ''}
-            </div>
-            <div class="peer-actions">
-                ${buttons}
-            </div>
+
+    const totalPages = Math.ceil(currentResults.length / ROWS_PER_PAGE);
+    currentPage = Math.min(currentPage, totalPages);
+    const start = (currentPage - 1) * ROWS_PER_PAGE;
+    const rows = await Promise.all(
+        currentResults.slice(start, start + ROWS_PER_PAGE).map(renderRow)
+    );
+    const label = `${currentResults.length} result${currentResults.length === 1 ? '' : 's'}`;
+
+    container.innerHTML = `<section class="results-panel" aria-label="Search results">
+        <div class="results-summary">${label}</div>
+        <div class="results-scroll">
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Title</th>
+                        <th>Posted by</th>
+                        <th>Peers</th>
+                        <th>DLs</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>${rows.join('')}</tbody>
+            </table>
         </div>
-    `;
+        ${totalPages > 1 ? `<div class="results-pagination">
+            <button type="button" data-action="previous-page" ${currentPage === 1 ? 'disabled' : ''}>Prev</button>
+            <span>Page ${currentPage} of ${totalPages}</span>
+            <button type="button" data-action="next-page" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>
+        </div>` : ''}
+    </section>`;
+
+    watchThumbnails(container);
 }
 
-function setupEventListeners(url, entries) {
-    const urlId = createSafeId(url);
+function handleTableClick(event) {
+    const control = event.target.closest('[data-action]');
+    if (!control) return;
 
-    document.getElementById(`preview-${urlId}`)?.addEventListener('click', () => {
-        openPreview(entries[0].entryId);
-    });
-    
-    entries.forEach((entry, index) => {
-        if (entry.magnet && entry.magnet.trim()) {
-            const copyBtn = document.getElementById(`copy-${urlId}-${index}`);
-            const downloadBtn = document.getElementById(`download-${urlId}-${index}`);
-            const buttonId = `${urlId}-${index}`;
-            
-            if (copyBtn) {
-                copyBtn.addEventListener('click', () => {
-                    navigator.clipboard.writeText(entry.magnet);
-                    showToast('📋 Magnet link copied');
-                });
-            }
-            
-            if (downloadBtn) {
-                downloadBtn.addEventListener('click', async () => {
-                    downloadStates[buttonId] = 'downloading';
-                    downloadBtn.textContent = 'Downloading';
-                    downloadBtn.disabled = true;
-                    downloadBtn.classList.remove('download-btn');
-                    
-                    downloadManager.startDownload(
-                        entry.magnet, 
-                        entry.sourceURL, 
-                        entry.title,
-                        () => {
-                            downloadStates[buttonId] = 'downloaded';
-                            downloadBtn.textContent = 'Downloaded';
-                            downloadBtn.classList.add('downloaded-btn');
-                            
-                            import('../storage/db.js').then(({ trackDownload }) => {
-                                trackDownload(extractSlug(url));
-                            });
-                        }
-                    );
-                });
-            }
-        }
-    });
-    
-    const userGroups = {};
-    entries.forEach(entry => {
-        const username = entry.addedBy || 'Anonymous';
-        if (!userGroups[username]) {
-            userGroups[username] = [];
-        }
-        userGroups[username].push(entry);
-    });
-    
-    Object.entries(userGroups).forEach(([username, userEntries]) => {
-        if (userEntries.length > 1) {
-            const threadId = `thread-${urlId}-${createSafeId(username)}`;
-            const expandBtn = document.getElementById(`${threadId}-btn`);
-            const entriesDiv = document.getElementById(`${threadId}-entries`);
-            
-            if (expandBtn && entriesDiv) {
-                expandBtn.addEventListener('click', () => {
-                    const isExpanded = threadStates[threadId] || false;
-                    threadStates[threadId] = !isExpanded;
-                    
-                    if (threadStates[threadId]) {
-                        entriesDiv.style.display = 'block';
-                        expandBtn.textContent = 'Collapse ▲';
-                    } else {
-                        entriesDiv.style.display = 'none';
-                        expandBtn.textContent = 'Expand ▼';
-                    }
-                });
-            }
-            
-            const threadPrevBtn = document.getElementById(`thread-prev-${threadId}`);
-            const threadNextBtn = document.getElementById(`thread-next-${threadId}`);
-            
-            if (threadPrevBtn) {
-                threadPrevBtn.addEventListener('click', () => {
-                    threadPageStates[threadId]--;
-                    updatePeerList(url, entries, urlId);
-                });
-            }
-            
-            if (threadNextBtn) {
-                threadNextBtn.addEventListener('click', () => {
-                    threadPageStates[threadId]++;
-                    updatePeerList(url, entries, urlId);
-                });
-            }
-        }
-    });
-    
-    const prevBtn = document.getElementById(`prev-${urlId}`);
-    const nextBtn = document.getElementById(`next-${urlId}`);
-    
-    if (prevBtn) {
-        prevBtn.addEventListener('click', () => {
-            paginationState[urlId]--;
-            updatePeerList(url, entries, urlId);
-        });
-    }
-    
-    if (nextBtn) {
-        nextBtn.addEventListener('click', () => {
-            paginationState[urlId]++;
-            updatePeerList(url, entries, urlId);
-        });
+    const { action, entryId } = control.dataset;
+    const entry = currentResults.find((item) => item.entryId === entryId);
+
+    if (action === 'previous-page' || action === 'next-page') {
+        currentPage += action === 'next-page' ? 1 : -1;
+        renderResults();
+    } else if (action === 'preview') {
+        openPreview(entryId);
+    } else if (action === 'copy' && entry) {
+        navigator.clipboard.writeText(entry.magnet);
+        showToast('📋 Magnet link copied');
+    } else if (action === 'download' && entry) {
+        startDownload(entry);
     }
 }
 
-function updatePeerList(url, entries, urlId) {
-    const peerListContainer = document.getElementById(`peer-list-${urlId}`);
-    const currentPage = paginationState[urlId];
-    const totalPages = Math.ceil(entries.length / PEERS_PER_PAGE);
-    
-    peerListContainer.innerHTML = renderPeerPage(urlId, entries, currentPage);
-    
-    const prevBtn = document.getElementById(`prev-${urlId}`);
-    const nextBtn = document.getElementById(`next-${urlId}`);
-    const title = document.querySelector(`#peer-list-${urlId}`).parentElement.querySelector('.peer-list-title');
-    
-    if (title) {
-        title.textContent = `Peers who have this: ${currentPage}/${totalPages}`;
-    }
-    
-    if (prevBtn) {
-        prevBtn.disabled = currentPage === 1;
-    }
-    
-    if (nextBtn) {
-        nextBtn.disabled = currentPage === totalPages;
-    }
-    
-    setupEventListeners(url, entries);
+function startDownload(entry) {
+    downloadStates.set(entry.entryId, 'downloading');
+    renderResults();
+
+    downloadManager.startDownload(entry.magnet, entry.sourceURL, entry.title, () => {
+        downloadStates.set(entry.entryId, 'downloaded');
+        trackDownload(extractSlug(entry.sourceURL));
+        renderResults();
+    });
 }
 
 function showToast(message) {
@@ -525,7 +230,7 @@ function showToast(message) {
     toast.className = 'toast';
     toast.textContent = message;
     document.body.appendChild(toast);
-    
+
     setTimeout(() => toast.classList.add('show'), 100);
     setTimeout(() => {
         toast.classList.remove('show');

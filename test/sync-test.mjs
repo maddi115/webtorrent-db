@@ -399,6 +399,34 @@ export async function run({ setup } = {}) {
         await helper.context.close();
         rmSync(helperData, { recursive: true, force: true });
 
+        const tablePage = await openPeer(browser, 'Table', setup, `testRoom=${TEST_ROOM}-table`);
+        await tablePage.evaluate(async (time) => {
+            const { importEntries } = await import('/src/browser/storage/db.js');
+            const { getEntryId } = await import('/src/shared/entryId.js');
+            const entries = await Promise.all(Array.from({ length: 25 }, async (_, index) => {
+                const entry = {
+                    sourceURL: `https://example.com/t/table-row-${index}/${index}`, title: `Table Row ${index}`,
+                    addedBy: 'Table Test', timestamp: time + index, room: 'general',
+                    magnet: `magnet:?xt=urn:btih:${index.toString(16).padStart(40, '0')}`, hasPreview: false
+                };
+                entry.entryId = await getEntryId(entry);
+                return entry;
+            }));
+            await importEntries(entries);
+        }, ID);
+        await tablePage.fill('#search-input', 'table row');
+        await tablePage.waitForSelector('.results-table tbody tr', { timeout: WAIT_MS });
+        report('Results show in a black table', await tablePage.evaluate(() => (
+            document.querySelectorAll('.results-table tbody tr').length === 20
+            && getComputedStyle(document.querySelector('.results-panel')).backgroundColor === 'rgb(0, 0, 0)'
+        )));
+        await tablePage.click('[data-action="next-page"]');
+        const nextResults = await tablePage.waitForFunction(() => (
+            document.querySelectorAll('.results-table tbody tr').length === 5
+        ), null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Results table has pages', nextResults);
+        await tablePage.close();
+
         const snapshot = await a.evaluate(async () => {
             const { getEntryId, toPublicEntry } = await import('/src/shared/entryId.js');
             const {
