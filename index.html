@@ -25,6 +25,11 @@
                 
                 <div class="search-actions">
                     <button id="add-entry-btn">+ Add Entry</button>
+                    <button id="profile-btn" class="profile-btn" type="button" aria-label="Change profile picture" title="Change profile picture">
+                        <span>👤</span>
+                        <img id="profile-image" alt="">
+                    </button>
+                    <input id="profile-upload" type="file" accept="image/*" hidden>
                     <span id="username-display" class="username"></span>
                 </div>
             </div>
@@ -52,6 +57,28 @@
             <span>Entries: <span id="entry-count">0</span></span>
         </footer>
     </div>
+
+    <section class="peer-panel" aria-label="Connected peers">
+        <div class="peer-panel-summary">
+            <span>Online: <span id="peer-online-count">1</span></span>
+            <span>Direct connections: <span id="peer-direct-count">0</span></span>
+        </div>
+        <div class="peer-panel-scroll">
+            <table class="peer-table">
+                <thead>
+                    <tr>
+                        <th>Photo</th>
+                        <th>User</th>
+                        <th>Peer ID</th>
+                        <th>Connections</th>
+                        <th>Links</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="peer-table-body"></tbody>
+            </table>
+        </div>
+    </section>
 
     <script type="module" src="/src/main.js"></script>
 </body>

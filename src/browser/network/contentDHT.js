@@ -1,7 +1,6 @@
 // contentDHT.js - Track which peers have which content
 import { logger } from '../../shared/logger.js';
 import { peerManager } from './peerManager.js';
-import { extractSlug } from '../../shared/urlParser.js';
 
 class ContentDHT {
     constructor() {
@@ -38,20 +37,6 @@ class ContentDHT {
 
     hasContent(contentId) {
         return this.contentToPeers.has(contentId) && this.contentToPeers.get(contentId).size > 0;
-    }
-
-    async announceAll() {
-        const { getAllEntries } = await import('../storage/db.js');
-        const entries = await getAllEntries();
-        
-        entries.forEach(entry => {
-            const slug = extractSlug(entry.sourceURL);
-            peerManager.broadcast({
-                type: 'announce',
-                contentId: slug,
-                sync: true
-            });
-        });
     }
 
     announceContent(contentId) {

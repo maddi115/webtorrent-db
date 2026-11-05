@@ -1,6 +1,8 @@
 // db.js - Add stats tracking
 import { openDB } from 'idb';
-import { extractTitle } from '../../shared/urlParser.js';
+import { extractSlug, extractTitle } from '../../shared/urlParser.js';
+import { getEntryId } from '../../shared/entryId.js';
+import { resizeImage } from '../../shared/images.js';
 
 const DB_NAME = 'webtorrent-metadata-db-v2';
 const STORE_NAME = 'entries';
@@ -11,8 +13,8 @@ let markReady;
 const dbReady = new Promise((resolve) => { markReady = resolve; });
 
 export async function initDB() {
-    db = await openDB(DB_NAME, 4, {
-        upgrade(upgradeDb, oldVersion) {
+    db = await openDB(DB_NAME, 5, {
+        upgrade(upgradeDb, oldVersion, newVersion, transaction) {
             // Entries store
             if (!upgradeDb.objectStoreNames.contains(STORE_NAME)) {
                 const store = upgradeDb.createObjectStore(STORE_NAME, { 
@@ -21,6 +23,11 @@ export async function initDB() {
                 });
                 store.createIndex('sourceURL', 'sourceURL', { unique: false });
                 store.createIndex('timestamp', 'timestamp');
+            }
+
+            const entries = transaction.objectStore(STORE_NAME);
+            if (!entries.indexNames.contains('entryId')) {
+                entries.createIndex('entryId', 'entryId');
             }
             
             // Stats store
@@ -34,8 +41,51 @@ export async function initDB() {
         },
     });
     
+    await backfillEntries();
     markReady();
-    console.log('✅ Database initialized (v4)');
+    console.log('✅ Database initialized (v5)');
+}
+
+async function backfillEntries() {
+    const entries = await db.getAll(STORE_NAME);
+
+    for (const entry of entries) {
+        if (entry.entryId && (entry.thumb || !entry.preview)) continue;
+
+        entry.entryId = entry.entryId || await getEntryId(entry);
+        entry.hasPreview = Boolean(entry.preview);
+        if (entry.preview && !entry.thumb) {
+            entry.thumb = await resizeImage(entry.preview, 160, 0.7).catch(() => null);
+        }
+        await db.put(STORE_NAME, entry);
+    }
+}
+
+export async function getEntryById(entryId) {
+    await dbReady;
+    return db.getFromIndex(STORE_NAME, 'entryId', entryId);
+}
+
+export async function getEntrySummaries() {
+    const entries = await getAllEntries();
+    return entries.map((entry) => ({
+        id: entry.entryId,
+        slug: extractSlug(entry.sourceURL)
+    }));
+}
+
+export async function getEntryCount() {
+    await dbReady;
+    return db.count(STORE_NAME);
+}
+
+export async function savePreview(entryId, preview) {
+    const entry = await getEntryById(entryId);
+    if (!entry?.hasPreview) return false;
+
+    entry.preview = preview;
+    await db.put(STORE_NAME, entry);
+    return true;
 }
 
 export async function reannounceAllEntries() {

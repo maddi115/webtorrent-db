@@ -4,6 +4,8 @@ import { gossipBinary } from '../network/gossipBinary.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
+import { getEntryId } from '../../shared/entryId.js';
+import { resizeImage } from '../../shared/images.js';
 
 export function initAddEntry() {
     const addEntryBtn = document.getElementById('add-entry-btn');
@@ -51,10 +53,13 @@ export function initAddEntry() {
             magnet: magnetLink || null,
             instantIOLink: instantIOLink || null,
             timestamp: Date.now(),
-            preview: previewFile ? await uploadPreview(previewFile) : null,
+            preview: previewFile ? await resizeImage(previewFile, 1600, 0.85) : null,
+            thumb: previewFile ? await resizeImage(previewFile, 160, 0.7) : null,
+            hasPreview: Boolean(previewFile),
             title: title,
             addedBy: username
         };
+        entry.entryId = await getEntryId(entry);
         
         await addEntry(entry);
         
@@ -70,14 +75,6 @@ export function initAddEntry() {
         document.getElementById('instantio-link').value = '';
         document.getElementById('preview-upload').value = '';
         modal.style.display = 'none';
-    });
-}
-
-async function uploadPreview(file) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.readAsDataURL(file);
     });
 }
 

@@ -95,7 +95,7 @@ async function countLink(page, url) {
 }
 
 export async function run({ setup } = {}) {
-    await ensureServer(3000, 'npx', ['vite', '--port', '3000'], '.');
+    await ensureServer(3000, process.execPath, ['node_modules/vite/bin/vite.js', '--port', '3000'], '.');
     const browser = await chromium.launch();
     try {
         const a = await openPeer(browser, 'A', setup);
@@ -136,8 +136,48 @@ export async function run({ setup } = {}) {
             customTitle, { timeout: WAIT_MS }).then(() => true).catch(() => false);
         report('Search finds and shows custom title', titleShown);
 
+        const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+        const image = { name: 'test.png', mimeType: 'image/png', buffer: pixel };
+        const u5 = `https://example.com/t/fake-link-e-${ID}/5`;
+        await a.setInputFiles('#profile-upload', image);
+        await a.click('#add-entry-btn');
+        await a.setInputFiles('#preview-upload', image);
+        await a.fill('#source-url', u5);
+        await a.fill('#magnet-link', `magnet:?xt=urn:btih:${hash}`);
+        await a.click('#add-btn');
+        const previewEntry = await hasLink(b, u5);
+        report('Thumbnail syncs without full image', Boolean(previewEntry?.thumb && !previewEntry.preview));
+
+        await b.fill('#search-input', `fake-link-e-${ID}`);
+        await b.click('.preview-thumb');
+        await b.waitForSelector('#preview-overlay img', { timeout: WAIT_MS });
+        report('Full image loads on demand', Boolean((await hasLink(b, u5))?.preview));
+        await b.click('#preview-overlay');
+
+        const avatarShown = await b.waitForFunction(
+            () => document.querySelectorAll('#peer-table-body img').length > 0,
+            null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Profile picture appears in peer table', avatarShown);
+
+        const unsafeTitle = '<img src=x onerror="window.unsafeRan=true">';
+        const u6 = `https://example.com/t/fake-link-f-${ID}/6`;
+        await addLink(a, u6, { magnet: `magnet:?xt=urn:btih:${hash}`, title: unsafeTitle });
+        await hasLink(b, u6);
+        await b.fill('#search-input', `fake-link-f-${ID}`);
+        await b.waitForSelector('.url-title', { timeout: WAIT_MS });
+        await new Promise((r) => setTimeout(r, 1000));
+        const unsafeRan = await b.evaluate(() => window.unsafeRan === true);
+        report('Unsafe title stays plain text', !unsafeRan);
+
         const c = await openPeer(browser, 'C', setup);
         await waitForPeers(c, 2);
+        const tableShown = await c.waitForFunction(() => {
+            const rows = document.querySelectorAll('#peer-table-body tr').length;
+            const online = document.getElementById('peer-online-count').textContent;
+            const direct = document.getElementById('peer-direct-count').textContent;
+            return rows === 3 && online === '3' && direct === '3';
+        }, null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Peer table shows live counts', tableShown);
         report('Late joiner receives existing links', !!(await hasLink(c, u1)));
 
         await a.reload();

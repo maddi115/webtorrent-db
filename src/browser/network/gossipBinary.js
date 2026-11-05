@@ -1,213 +1,60 @@
-// gossipBinary.js - Remove ID before saving peer entries
+// gossipBinary.js - Share links between peers as JSON
 import { peerManager } from './peerManager.js';
-import { addEntry, getEntryByURL } from '../storage/db.js';
+import { addEntry, getEntryById } from '../storage/db.js';
 import { contentDHT } from './contentDHT.js';
 import { extractSlug } from '../../shared/urlParser.js';
-import { getCRDTModule, getSerializerModule } from '../wasm/wasmLoader.js';
+import { getEntryId, toPublicEntry } from '../../shared/entryId.js';
+import { MAX_THUMB_CHARS, safeImage, safeLink, shortText } from '../../shared/safe.js';
 import { logger } from '../../shared/logger.js';
 
-class GossipEngineBinary {
+class GossipEngine {
     constructor() {
-        this.crdt = null;
-        this.serializer = null;
-        this.wasmReady = false;
-        this.useBinary = false;
         this.receiving = new Set();
     }
-    
+
     async init() {
-        const crdtModule = getCRDTModule();
-        const serializerModule = getSerializerModule();
-        
-        if (crdtModule && serializerModule) {
-            this.crdt = new crdtModule.CRDTMerger();
-            this.serializer = serializerModule;
-            this.wasmReady = true;
-            // Binary stays off: bytes get corrupted passing through std::string
-            // (blank URLs on the other peer), and JSON came out smaller anyway.
-            this.useBinary = false;
-            logger.info('✅ Gossip initialized (JSON)');
-        } else {
-            logger.warn('⚠️  Binary serialization unavailable, using JSON');
-        }
-    }
-    
-    propagateEntry(entry) {
-        if (this.wasmReady && this.crdt) {
-            this.crdt.addEntry(
-                entry.sourceURL,
-                entry.magnet || '',
-                entry.title || '',
-                entry.addedBy || '',
-                entry.preview || '',
-                entry.timestamp
-            );
-        }
-        
-        let message;
-        let messageType;
-        
-        if (this.useBinary && this.serializer) {
-            try {
-                const binary = this.serializer.serializeEntry(
-                    entry.sourceURL,
-                    entry.magnet || '',
-                    entry.title || '',
-                    entry.addedBy || '',
-                    '', // Empty preview in binary
-                    entry.timestamp
-                );
-                
-                const base64 = this.uint8ArrayToBase64(binary);
-                
-                message = {
-                    type: 'entry_binary',
-                    binary: base64,
-                    preview: entry.preview
-                };
-                
-                messageType = '📦 [BINARY]';
-                
-                const jsonSize = JSON.stringify({ type: 'entry', entry }).length;
-                const metadataSize = base64.length;
-                const previewSize = entry.preview ? entry.preview.length : 0;
-                const totalSize = metadataSize + previewSize;
-                const savings = ((1 - metadataSize / (jsonSize - previewSize)) * 100).toFixed(1);
-                
-                logger.info(`${messageType} Metadata: ${metadataSize}b (${savings}% smaller), Preview: ${previewSize}b, Total: ${totalSize}b`);
-            } catch (error) {
-                logger.error('❌ Binary serialization failed, falling back to JSON:', error);
-                message = { type: 'entry', entry };
-                messageType = '📤 [JSON]';
-            }
-        } else {
-            message = { type: 'entry', entry };
-            messageType = '📤 [JSON]';
-            logger.info(`${messageType} Propagating entry:`, entry.sourceURL);
-        }
-        
-        peerManager.broadcast(message);
-    }
-    
-    // Only handle one copy of a link at a time, so it can't save twice
-    async receiveEntry(entry, isBinary = false) {
-        if (this.receiving.has(entry.sourceURL)) return;
-        this.receiving.add(entry.sourceURL);
-        try {
-            await this.saveReceivedEntry(entry, isBinary);
-        } finally {
-            this.receiving.delete(entry.sourceURL);
-        }
+        logger.info('✅ Gossip initialized (JSON)');
     }
 
-    async saveReceivedEntry(entry, isBinary) {
-        const format = isBinary ? '[BINARY]' : '[JSON]';
-        logger.info(`🔍 ${format} Checking received entry:`, entry.sourceURL);
-        
-        const existingEntry = await getEntryByURL(entry.sourceURL);
-        
-        if (existingEntry) {
-            if (this.wasmReady && this.crdt) {
-                const existingTimestamp = existingEntry.timestamp;
-                
-                if (entry.timestamp > existingTimestamp) {
-                    logger.info(`⚡ ${format} Newer version, updating...`);
-                    this.crdt.addEntry(
-                        entry.sourceURL,
-                        entry.magnet || '',
-                        entry.title || '',
-                        entry.addedBy || '',
-                        entry.preview || '',
-                        entry.timestamp
-                    );
-                } else {
-                    logger.warn(`⚠️  ${format} Older version, skipping`);
-                    return;
-                }
-            } else {
-                logger.warn('⚠️  Entry already in local DB, skipping');
-                return;
-            }
-        }
-        
-        logger.info(`📥 ${format} Received NEW entry:`, entry.sourceURL);
-        
+    propagateEntry(entry) {
+        peerManager.broadcast({ type: 'entry', entry: toPublicEntry(entry) });
+    }
+
+    async receiveEntry(rawEntry) {
+        if (typeof rawEntry?.sourceURL !== 'string' || !rawEntry.sourceURL) return;
+        if (!Number.isFinite(rawEntry.timestamp)) return;
+
+        const entry = {
+            sourceURL: shortText(rawEntry.sourceURL, 2000),
+            magnet: shortText(rawEntry.magnet, 4000) || null,
+            instantIOLink: safeLink(rawEntry.instantIOLink) === '#' ? null : shortText(rawEntry.instantIOLink, 2000),
+            title: shortText(rawEntry.title, 200),
+            addedBy: shortText(rawEntry.addedBy, 100),
+            timestamp: rawEntry.timestamp,
+            thumb: safeImage(rawEntry.thumb, MAX_THUMB_CHARS),
+            hasPreview: rawEntry.hasPreview === true,
+            preview: null
+        };
+        entry.entryId = await getEntryId(entry);
+
+        if (this.receiving.has(entry.entryId)) return;
+        this.receiving.add(entry.entryId);
+
         try {
-            if (this.wasmReady && this.crdt) {
-                this.crdt.addEntry(
-                    entry.sourceURL,
-                    entry.magnet || '',
-                    entry.title || '',
-                    entry.addedBy || '',
-                    entry.preview || '',
-                    entry.timestamp
-                );
-                logger.info(`⚡ CRDT now has ${this.crdt.getCount()} entries`);
-            }
-            
-            // CRITICAL FIX: Remove 'id' field from peer entries
-            const cleanEntry = {
-                sourceURL: entry.sourceURL,
-                magnet: entry.magnet,
-                instantIOLink: entry.instantIOLink || null,
-                title: entry.title,
-                addedBy: entry.addedBy,
-                preview: entry.preview,
-                timestamp: entry.timestamp
-            };
-            
-            await addEntry(cleanEntry);
+            if (await getEntryById(entry.entryId)) return;
+
+            await addEntry(entry);
             logger.info('✅ Entry saved to local DB');
-            
-            const slug = extractSlug(entry.sourceURL);
-            contentDHT.announceContent(slug);
-            
-            import('../ui/search.js').then(({ refreshResults }) => {
-                refreshResults();
-            });
-            
+            contentDHT.announceContent(extractSlug(entry.sourceURL));
+
+            const { refreshResults } = await import('../ui/search.js');
+            refreshResults();
             showToast(`📥 New: ${entry.title || 'Untitled'}`);
-            
         } catch (error) {
             logger.error('Failed to save received entry:', error);
+        } finally {
+            this.receiving.delete(entry.entryId);
         }
-    }
-    
-    deserializeBinary(base64String, preview) {
-        if (!this.serializer) {
-            throw new Error('Serializer not loaded');
-        }
-        
-        try {
-            const binaryString = atob(base64String);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            
-            let dataString = '';
-            for (let i = 0; i < bytes.length; i++) {
-                dataString += String.fromCharCode(bytes[i]);
-            }
-            
-            const entry = this.serializer.deserializeEntry(dataString);
-            entry.preview = preview || null;
-            
-            logger.info(`📦 Deserialized metadata (${base64String.length} bytes) + preview`);
-            
-            return entry;
-        } catch (error) {
-            logger.error('❌ Deserialization failed:', error);
-            return null;
-        }
-    }
-    
-    uint8ArrayToBase64(uint8Array) {
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        return btoa(binary);
     }
 }
 
@@ -216,7 +63,7 @@ function showToast(message) {
     toast.className = 'toast';
     toast.textContent = message;
     document.body.appendChild(toast);
-    
+
     setTimeout(() => toast.classList.add('show'), 100);
     setTimeout(() => {
         toast.classList.remove('show');
@@ -224,4 +71,4 @@ function showToast(message) {
     }, 3000);
 }
 
-export const gossipBinary = new GossipEngineBinary();
+export const gossipBinary = new GossipEngine();

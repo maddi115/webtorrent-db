@@ -711,3 +711,143 @@ footer span {
     width: 100%;
   }
 }
+
+/* Profile picture */
+.profile-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 50%;
+  background: hsl(var(--search-bg));
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.profile-btn img {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.preview-thumb {
+  cursor: zoom-in;
+}
+
+/* Full preview */
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.88);
+  cursor: zoom-out;
+}
+
+.preview-overlay img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Live peers table */
+body {
+  padding-bottom: 260px;
+}
+
+.peer-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  background: #000;
+  color: #fff;
+  border-top: 1px solid #333;
+}
+
+.peer-panel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid #333;
+}
+
+.peer-panel-scroll {
+  overflow: auto;
+}
+
+.peer-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.peer-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 16px;
+  background: #000;
+  color: #aaa;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.peer-table td {
+  padding: 6px 16px;
+  border-top: 1px solid #222;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.peer-table td:nth-child(3) {
+  color: #aaa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.peer-self {
+  background: #151515;
+}
+
+.peer-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.peer-avatar-empty {
+  background: #333;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Keep the add form above the peers table */
+.modal {
+  z-index: 1500;
+}

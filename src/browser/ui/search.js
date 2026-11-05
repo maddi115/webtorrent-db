@@ -6,6 +6,8 @@ import { presenceManager } from '../network/presence.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
 import { logger } from '../../shared/logger.js';
+import { escapeHTML, MAX_THUMB_CHARS, safeImage, safeLink } from '../../shared/safe.js';
+import { openPreview } from './preview.js';
 
 let searchTimeout;
 const paginationState = {};
@@ -143,6 +145,7 @@ async function createURLMatchCard(url, entries) {
     }
     
     const urlId = createSafeId(url);
+    const thumb = safeImage(firstEntry.thumb, MAX_THUMB_CHARS);
     
     if (!paginationState[urlId]) {
         paginationState[urlId] = 1;
@@ -155,14 +158,14 @@ async function createURLMatchCard(url, entries) {
         <div class="url-match-card">
             <div class="url-match-summary">
                 <div class="url-preview">
-                    ${firstEntry.preview ? 
-                        `<img src="${firstEntry.preview}" alt="Preview">` : 
+                    ${thumb ? 
+                        `<img id="preview-${urlId}" class="preview-thumb" src="${thumb}" alt="Preview">` : 
                         '<div class="no-preview-large">📄</div>'
                     }
                 </div>
                 <div class="url-info">
-                    <h3 class="url-title">${firstEntry.title || 'Untitled'}</h3>
-                    <a href="${url}" target="_blank" class="url-source">${hostname}</a>
+                    <h3 class="url-title">${escapeHTML(firstEntry.title || 'Untitled')}</h3>
+                    <a href="${escapeHTML(safeLink(url))}" target="_blank" rel="noopener noreferrer" class="url-source">${escapeHTML(hostname)}</a>
                     <div class="url-stats">
                         <span class="stat">👥 ${peersOnline} peer${peersOnline !== 1 ? 's' : ''} online</span>
                         <span class="stat">📥 ${stats.downloads} download${stats.downloads !== 1 ? 's' : ''}</span>
@@ -265,7 +268,7 @@ function createPeerThread(urlId, username, items) {
         
         if (hasInstantIO) {
             buttons += `
-                <a href="${entry.instantIOLink}" target="_blank" class="instantio-btn">instant.io ↗</a>
+                <a href="${escapeHTML(safeLink(entry.instantIOLink))}" target="_blank" rel="noopener noreferrer" class="instantio-btn">instant.io ↗</a>
             `;
         }
         
@@ -282,7 +285,7 @@ function createPeerThread(urlId, username, items) {
         <div class="peer-thread ${isExpanded ? 'expanded' : 'collapsed'}">
             <div class="thread-header" id="${threadId}-header">
                 <div class="thread-user-info">
-                    <span class="username">${username} (${items.length} entries)</span>
+                    <span class="username">${escapeHTML(username)} (${items.length} entries)</span>
                     ${isOnline ? 
                         '<span class="status online">🟢 Online</span>' : 
                         `<span class="status offline">⚪ Offline</span>`
@@ -345,7 +348,7 @@ function createPeerCard(urlId, entry, globalIndex) {
     
     if (hasInstantIO) {
         buttons += `
-            <a href="${entry.instantIOLink}" target="_blank" class="instantio-btn">instant.io ↗</a>
+            <a href="${escapeHTML(safeLink(entry.instantIOLink))}" target="_blank" rel="noopener noreferrer" class="instantio-btn">instant.io ↗</a>
         `;
     }
     
@@ -356,7 +359,7 @@ function createPeerCard(urlId, entry, globalIndex) {
     return `
         <div class="peer-card">
             <div class="peer-card-header">
-                <span class="username">${username}</span>
+                <span class="username">${escapeHTML(username)}</span>
                 ${isOnline ? 
                     '<span class="status online">🟢 Online</span>' : 
                     `<span class="status offline">⚪ Offline</span>`
@@ -372,6 +375,10 @@ function createPeerCard(urlId, entry, globalIndex) {
 
 function setupEventListeners(url, entries) {
     const urlId = createSafeId(url);
+
+    document.getElementById(`preview-${urlId}`)?.addEventListener('click', () => {
+        openPreview(entries[0].entryId);
+    });
     
     entries.forEach((entry, index) => {
         if (entry.magnet && entry.magnet.trim()) {
