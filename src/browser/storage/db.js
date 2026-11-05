@@ -2,7 +2,7 @@
 import { openDB } from 'idb';
 import { extractSlug } from '../../shared/urlParser.js';
 import { getEntryId } from '../../shared/entryId.js';
-import { resizeImage } from '../../shared/images.js';
+import { makeThumbHash, resizeImage } from '../../shared/images.js';
 import { getTopic } from '../../shared/rooms.js';
 
 const OLD_DB_NAME = 'webtorrent-metadata-db-v2';
@@ -73,9 +73,18 @@ async function migrateOldDatabase() {
     await call('setMeta', 'indexeddb_migrated', '1');
 }
 
+async function addMissingThumbHashes() {
+    const entries = await call('getThumbsWithoutHash');
+    for (const { entryId, thumb } of entries) {
+        const thumbHash = await makeThumbHash(thumb).catch(() => null);
+        if (thumbHash) await call('saveThumbHash', entryId, thumbHash);
+    }
+}
+
 export async function initDB() {
     ({ storageMode } = await call('open'));
     await migrateOldDatabase();
+    await addMissingThumbHashes();
     markReady();
     console.log(`✅ SQLite database ready (${storageMode})`);
 }
@@ -107,6 +116,10 @@ export async function getEntrySummaries() {
 
 export function getEntryCount() {
     return ready('getEntryCount', getTopic());
+}
+
+export function saveThumb(entryId, thumb) {
+    return ready('saveThumb', entryId, thumb);
 }
 
 export function savePreview(entryId, preview) {

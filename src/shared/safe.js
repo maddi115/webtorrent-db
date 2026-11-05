@@ -26,6 +26,10 @@ export function safeImage(value, maxChars) {
         : null;
 }
 
+export function safeThumbHash(value) {
+    return typeof value === 'string' && /^[a-zA-Z0-9+/=]{8,64}$/.test(value) ? value : null;
+}
+
 export function shortText(value, maxChars) {
     return typeof value === 'string' ? value.slice(0, maxChars) : '';
 }

@@ -132,9 +132,15 @@ export async function run({ setup } = {}) {
         await a.fill('#magnet-link', `magnet:?xt=urn:btih:${hash}`);
         await a.click('#add-btn');
         const previewEntry = await hasLink(b, u5);
-        report('Thumbnail syncs without full image', Boolean(previewEntry?.thumb && !previewEntry.preview));
+        report('ThumbHash syncs without images', Boolean(previewEntry?.thumbHash && !previewEntry.thumb && !previewEntry.preview));
 
         await b.fill('#search-input', `fake-link-e-${ID}`);
+        const thumbLoaded = await b.waitForFunction(() => {
+            const image = document.querySelector('.preview-thumb');
+            return image?.src.startsWith('data:image/') && !image.hasAttribute('data-needs-thumb');
+        }, null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Thumbnail loads when on screen', thumbLoaded);
+
         await b.click('.preview-thumb');
         await b.waitForSelector('#preview-overlay img', { timeout: WAIT_MS });
         report('Full image loads on demand', Boolean((await hasLink(b, u5))?.preview));
@@ -144,6 +150,20 @@ export async function run({ setup } = {}) {
             () => document.querySelectorAll('#peer-table-body img').length > 0,
             null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
         report('Profile picture appears in peer table', avatarShown);
+
+        const dirtyURL = `https://example.com/t/fake-link-clean-${ID}/10?utm_source=x&fbclid=y&keep=1`;
+        const cleanURL = `https://example.com/t/fake-link-clean-${ID}/10?keep=1`;
+        await addLink(a, dirtyURL, { magnet: `magnet:?xt=urn:btih:${hash.toUpperCase()}&dn=File&tr=wss%3A%2F%2Ftracker.example` });
+        const cleanEntry = await hasLink(b, cleanURL);
+        report('Tracking junk is removed from URLs', Boolean(cleanEntry));
+        report('Magnet rebuilds from its raw hash', cleanEntry?.magnet === `magnet:?xt=urn:btih:${hash}`);
+
+        const messageSize = await a.evaluate(async (url) => {
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { toPublicEntry } = await import('/src/shared/entryId.js');
+            return JSON.stringify(toPublicEntry(await getEntryByURL(url))).length;
+        }, cleanURL);
+        report('Link messages stay tiny', messageSize < 220, `${messageSize} bytes`);
 
         const unsafeTitle = '<img src=x onerror="window.unsafeRan=true">';
         const u6 = `https://example.com/t/fake-link-f-${ID}/6`;

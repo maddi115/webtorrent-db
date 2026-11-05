@@ -9,6 +9,7 @@ import { toPublicEntry } from '../../shared/entryId.js';
 import { extractSlug } from '../../shared/urlParser.js';
 import { MAX_AVATAR_CHARS, MAX_PREVIEW_CHARS, safeImage, shortText } from '../../shared/safe.js';
 import { renderPeerTable } from '../ui/peerTable.js';
+import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
 
 const MAX_SYNC_ITEMS = 5000;
 const REQUEST_RETRY_MS = 15000;
@@ -154,6 +155,14 @@ class PeerManager {
 
             case 'entry':
                 gossipBinary.receiveEntry(data.entry, connection.peer);
+                break;
+
+            case 'request_thumb':
+                sendThumbnail(data.entryId, connection);
+                break;
+
+            case 'thumb':
+                receiveThumbnail(data.entryId, data.thumb);
                 break;
 
             case 'request_preview':

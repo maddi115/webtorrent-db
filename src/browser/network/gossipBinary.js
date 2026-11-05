@@ -3,8 +3,8 @@ import { peerManager } from './peerManager.js';
 import { addEntry, getEntryById } from '../storage/db.js';
 import { contentDHT } from './contentDHT.js';
 import { extractSlug } from '../../shared/urlParser.js';
-import { getEntryId, toPublicEntry } from '../../shared/entryId.js';
-import { MAX_THUMB_CHARS, safeImage, safeLink, shortText } from '../../shared/safe.js';
+import { fromPublicEntry, getEntryId, toPublicEntry } from '../../shared/entryId.js';
+import { safeLink, safeThumbHash, shortText } from '../../shared/safe.js';
 import { getTopic, isTopic } from '../../shared/rooms.js';
 import { logger } from '../../shared/logger.js';
 
@@ -21,7 +21,14 @@ class GossipEngine {
         peerManager.broadcast({ type: 'entry', entry: toPublicEntry(entry) });
     }
 
-    async receiveEntry(rawEntry, sourcePeerId) {
+    async receiveEntry(packedEntry, sourcePeerId) {
+        let rawEntry;
+        try {
+            rawEntry = fromPublicEntry(packedEntry);
+        } catch {
+            return;
+        }
+
         if (typeof rawEntry?.sourceURL !== 'string' || !rawEntry.sourceURL) return;
         const room = rawEntry.room || 'general';
         if (!isTopic(room) || room !== getTopic()) return;
@@ -34,7 +41,8 @@ class GossipEngine {
             title: shortText(rawEntry.title, 200),
             addedBy: shortText(rawEntry.addedBy, 100),
             timestamp: rawEntry.timestamp,
-            thumb: safeImage(rawEntry.thumb, MAX_THUMB_CHARS),
+            thumb: null,
+            thumbHash: safeThumbHash(rawEntry.thumbHash),
             hasPreview: rawEntry.hasPreview === true,
             preview: null,
             room

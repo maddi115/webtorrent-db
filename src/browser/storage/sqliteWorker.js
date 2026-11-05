@@ -8,7 +8,7 @@ const SEARCH_LIMIT = 200;
 const ENTRY_COLUMNS = `
     entry_id AS entryId, room, source_url AS sourceURL, magnet,
     instant_io_link AS instantIOLink, title, added_by AS addedBy, timestamp,
-    thumb, has_preview AS hasPreview
+    thumb, thumb_hash AS thumbHash, has_preview AS hasPreview
 `;
 
 let db;
@@ -90,6 +90,10 @@ async function openDatabase() {
 
     db.exec('PRAGMA synchronous = NORMAL;');
     db.exec(SCHEMA);
+    const columns = db.selectObjects('PRAGMA table_info(entries)');
+    if (!columns.some((column) => column.name === 'thumb_hash')) {
+        db.exec('ALTER TABLE entries ADD COLUMN thumb_hash TEXT');
+    }
     return { storageMode };
 }
 
@@ -108,8 +112,8 @@ function insertEntry(entry) {
     db.exec({
         sql: `INSERT OR IGNORE INTO entries (
             entry_id, room, source_url, magnet, instant_io_link, title,
-            added_by, timestamp, thumb, has_preview, preview
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            added_by, timestamp, thumb, thumb_hash, has_preview, preview
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         bind: [
             entry.entryId,
             entry.room || 'general',
@@ -120,6 +124,7 @@ function insertEntry(entry) {
             entry.addedBy || null,
             entry.timestamp,
             entry.thumb || null,
+            entry.thumbHash || null,
             entry.hasPreview ? 1 : 0,
             entry.preview || null
         ]
@@ -209,6 +214,28 @@ const methods = {
              LIMIT ${SEARCH_LIMIT}`,
             [room, pattern, pattern]
         );
+    },
+
+    getThumbsWithoutHash() {
+        return selectAll(
+            'SELECT entry_id AS entryId, thumb FROM entries WHERE thumb IS NOT NULL AND thumb_hash IS NULL'
+        );
+    },
+
+    saveThumbHash(entryId, thumbHash) {
+        db.exec({
+            sql: 'UPDATE entries SET thumb_hash = ? WHERE entry_id = ?',
+            bind: [thumbHash, entryId]
+        });
+    },
+
+    saveThumb(entryId, thumb) {
+        db.exec({
+            sql: `UPDATE entries SET thumb = ?
+                  WHERE entry_id = ? AND thumb IS NULL AND thumb_hash IS NOT NULL`,
+            bind: [thumb, entryId]
+        });
+        return db.changes() > 0;
     },
 
     savePreview(entryId, preview) {

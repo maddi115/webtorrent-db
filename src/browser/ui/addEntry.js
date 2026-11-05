@@ -6,7 +6,8 @@ import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
 import { getTopic } from '../../shared/rooms.js';
 import { getEntryId } from '../../shared/entryId.js';
-import { resizeImage } from '../../shared/images.js';
+import { makeThumbHash, resizeImage } from '../../shared/images.js';
+import { cleanURL, normalizeMagnet } from '../../shared/links.js';
 
 export function initAddEntry() {
     const addEntryBtn = document.getElementById('add-entry-btn');
@@ -30,8 +31,8 @@ export function initAddEntry() {
     
     addBtn.addEventListener('click', async () => {
         const customTitle = document.getElementById('entry-title').value.trim();
-        const sourceURL = document.getElementById('source-url').value.trim();
-        const magnetLink = document.getElementById('magnet-link').value.trim();
+        const sourceURL = cleanURL(document.getElementById('source-url').value.trim());
+        const magnetLink = normalizeMagnet(document.getElementById('magnet-link').value.trim());
         const instantIOLink = document.getElementById('instantio-link').value.trim();
         const previewFile = document.getElementById('preview-upload').files[0];
         
@@ -56,6 +57,7 @@ export function initAddEntry() {
             timestamp: Date.now(),
             preview: previewFile ? await resizeImage(previewFile, 1600, 0.85) : null,
             thumb: previewFile ? await resizeImage(previewFile, 160, 0.7) : null,
+            thumbHash: previewFile ? await makeThumbHash(previewFile) : null,
             hasPreview: Boolean(previewFile),
             title: title,
             addedBy: username,

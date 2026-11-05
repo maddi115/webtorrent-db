@@ -6,8 +6,10 @@ import { presenceManager } from '../network/presence.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
 import { logger } from '../../shared/logger.js';
-import { escapeHTML, MAX_THUMB_CHARS, safeImage, safeLink } from '../../shared/safe.js';
+import { escapeHTML, MAX_THUMB_CHARS, safeImage, safeLink, safeThumbHash } from '../../shared/safe.js';
+import { thumbHashToImage } from '../../shared/images.js';
 import { openPreview } from './preview.js';
+import { watchThumbnails } from './thumbnails.js';
 
 let searchTimeout;
 const paginationState = {};
@@ -107,6 +109,7 @@ async function displayResults(results, container) {
     );
     
     container.innerHTML = cards.join('');
+    watchThumbnails(container);
     
     Object.entries(grouped).forEach(([url, entries]) => {
         setupEventListeners(url, entries);
@@ -146,6 +149,9 @@ async function createURLMatchCard(url, entries) {
     
     const urlId = createSafeId(url);
     const thumb = safeImage(firstEntry.thumb, MAX_THUMB_CHARS);
+    const thumbHash = safeThumbHash(firstEntry.thumbHash);
+    const blurred = !thumb && thumbHash ? thumbHashToImage(thumbHash) : null;
+    const image = thumb || blurred;
     
     if (!paginationState[urlId]) {
         paginationState[urlId] = 1;
@@ -158,8 +164,8 @@ async function createURLMatchCard(url, entries) {
         <div class="url-match-card">
             <div class="url-match-summary">
                 <div class="url-preview">
-                    ${thumb ? 
-                        `<img id="preview-${urlId}" class="preview-thumb" src="${thumb}" alt="Preview">` : 
+                    ${image ? 
+                        `<img id="preview-${urlId}" class="preview-thumb" src="${image}" data-entry-id="${escapeHTML(firstEntry.entryId)}" ${blurred ? 'data-needs-thumb="true"' : ''} alt="Preview">` : 
                         '<div class="no-preview-large">📄</div>'
                     }
                 </div>
