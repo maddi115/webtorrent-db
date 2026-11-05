@@ -301,6 +301,58 @@ export async function run({ setup } = {}) {
         await syncA.context.close();
         await syncB.context.close();
 
+        const snapshot = await a.evaluate(async () => {
+            const { getEntryId, toPublicEntry } = await import('/src/shared/entryId.js');
+            const {
+                compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
+            } = await import('/src/shared/snapshot.js');
+
+            const entries = await Promise.all(Array.from({ length: 5000 }, async (_, index) => {
+                const hash = index.toString(16).padStart(40, '0');
+                const entry = {
+                    sourceURL: `https://example.com/t/snapshot-link-${index}/${index}`,
+                    title: index % 3 === 0 ? `Custom Title ${index}` : `Snapshot Link ${index}`,
+                    addedBy: `User${index % 40}`,
+                    timestamp: 1760000000000 + index * 1000,
+                    room: 'music',
+                    magnet: index % 10 === 0 ? 'magnet:?xt=urn:btih:custom' : `magnet:?xt=urn:btih:${hash}`,
+                    instantIOLink: index % 7 === 0 ? `https://instant.io/#${index}` : null,
+                    thumbHash: index % 2 === 0 ? 'AAAAAAAAAAAAAAAAAAAAAA==' : null,
+                    hasPreview: index % 2 === 0
+                };
+                entry.entryId = await getEntryId(entry);
+                return entry;
+            }));
+
+            const packed = packSnapshot('music', entries);
+            const compressed = await compressSnapshot(packed);
+            const restored = unpackSnapshot(await decompressSnapshot(compressed));
+            const originalIds = entries.map((entry) => entry.entryId).sort();
+            const restoredIds = (await Promise.all(restored.entries.map(getEntryId))).sort();
+
+            const damaged = compressed.slice();
+            damaged[Math.floor(damaged.length / 2)] ^= 255;
+            const damagedRejected = await decompressSnapshot(damaged)
+                .then(unpackSnapshot)
+                .then(() => false, () => true);
+
+            const junkRejected = await Promise.resolve()
+                .then(() => unpackSnapshot(new TextEncoder().encode('not a snapshot')))
+                .then(() => false, () => true);
+
+            return {
+                exact: originalIds.join() === restoredIds.join() && restored.room === 'music',
+                jsonBytes: JSON.stringify(entries.map(toPublicEntry)).length,
+                compressedBytes: compressed.length,
+                damagedRejected,
+                junkRejected
+            };
+        });
+        report('Snapshot restores every link exactly', snapshot.exact);
+        report('Snapshot is much smaller than JSON', snapshot.compressedBytes < snapshot.jsonBytes / 3,
+            `${snapshot.compressedBytes} vs ${snapshot.jsonBytes} bytes`);
+        report('Damaged snapshots are rejected', snapshot.damagedRejected && snapshot.junkRejected);
+
         await a.reload();
         await a.waitForFunction(() => document.getElementById('username-display')?.textContent);
         report('Links survive a page reload', Boolean(await hasLink(a, u1)));
