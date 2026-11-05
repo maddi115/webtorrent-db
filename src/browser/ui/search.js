@@ -79,7 +79,7 @@ async function performSearch(query) {
             if (connectedPeersWithContent.length > 0) {
                 connectedPeersWithContent.forEach(peerId => {
                     const peer = peerManager.getPeer(peerId);
-                    if (peer && peer.connected) {
+                    if (peer && peer.open) {
                         peer.send({
                             type: 'request_entry',
                             contentId: contentId

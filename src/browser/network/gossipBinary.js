@@ -12,6 +12,7 @@ class GossipEngineBinary {
         this.serializer = null;
         this.wasmReady = false;
         this.useBinary = false;
+        this.receiving = new Set();
     }
     
     async init() {
@@ -22,8 +23,10 @@ class GossipEngineBinary {
             this.crdt = new crdtModule.CRDTMerger();
             this.serializer = serializerModule;
             this.wasmReady = true;
-            this.useBinary = true;
-            logger.info('✅ Binary gossip initialized (FlatBuffers)');
+            // Binary stays off: bytes get corrupted passing through std::string
+            // (blank URLs on the other peer), and JSON came out smaller anyway.
+            this.useBinary = false;
+            logger.info('✅ Gossip initialized (JSON)');
         } else {
             logger.warn('⚠️  Binary serialization unavailable, using JSON');
         }
@@ -33,7 +36,7 @@ class GossipEngineBinary {
         if (this.wasmReady && this.crdt) {
             this.crdt.addEntry(
                 entry.sourceURL,
-                entry.magnet,
+                entry.magnet || '',
                 entry.title || '',
                 entry.addedBy || '',
                 entry.preview || '',
@@ -48,7 +51,7 @@ class GossipEngineBinary {
             try {
                 const binary = this.serializer.serializeEntry(
                     entry.sourceURL,
-                    entry.magnet,
+                    entry.magnet || '',
                     entry.title || '',
                     entry.addedBy || '',
                     '', // Empty preview in binary
@@ -86,7 +89,18 @@ class GossipEngineBinary {
         peerManager.broadcast(message);
     }
     
+    // Only handle one copy of a link at a time, so it can't save twice
     async receiveEntry(entry, isBinary = false) {
+        if (this.receiving.has(entry.sourceURL)) return;
+        this.receiving.add(entry.sourceURL);
+        try {
+            await this.saveReceivedEntry(entry, isBinary);
+        } finally {
+            this.receiving.delete(entry.sourceURL);
+        }
+    }
+
+    async saveReceivedEntry(entry, isBinary) {
         const format = isBinary ? '[BINARY]' : '[JSON]';
         logger.info(`🔍 ${format} Checking received entry:`, entry.sourceURL);
         
@@ -94,13 +108,13 @@ class GossipEngineBinary {
         
         if (existingEntry) {
             if (this.wasmReady && this.crdt) {
-                const existingTimestamp = this.crdt.getTimestamp(entry.sourceURL);
+                const existingTimestamp = existingEntry.timestamp;
                 
                 if (entry.timestamp > existingTimestamp) {
                     logger.info(`⚡ ${format} Newer version, updating...`);
                     this.crdt.addEntry(
                         entry.sourceURL,
-                        entry.magnet,
+                        entry.magnet || '',
                         entry.title || '',
                         entry.addedBy || '',
                         entry.preview || '',
@@ -122,7 +136,7 @@ class GossipEngineBinary {
             if (this.wasmReady && this.crdt) {
                 this.crdt.addEntry(
                     entry.sourceURL,
-                    entry.magnet,
+                    entry.magnet || '',
                     entry.title || '',
                     entry.addedBy || '',
                     entry.preview || '',
@@ -135,6 +149,7 @@ class GossipEngineBinary {
             const cleanEntry = {
                 sourceURL: entry.sourceURL,
                 magnet: entry.magnet,
+                instantIOLink: entry.instantIOLink || null,
                 title: entry.title,
                 addedBy: entry.addedBy,
                 preview: entry.preview,

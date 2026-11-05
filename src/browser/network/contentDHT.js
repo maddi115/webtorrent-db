@@ -48,7 +48,8 @@ class ContentDHT {
             const slug = extractSlug(entry.sourceURL);
             peerManager.broadcast({
                 type: 'announce',
-                contentId: slug
+                contentId: slug,
+                sync: true
             });
         });
     }

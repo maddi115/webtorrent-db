@@ -9,6 +9,7 @@ class PeerManager {
     constructor() {
         this.peers = new Map();
         this.peerIds = new Set();
+        this.requested = new Set();
     }
 
     addPeer(connection) {
@@ -78,6 +79,7 @@ class PeerManager {
                     const shortId = connection.peer.split('-')[0];
                     logger.info(`📥 Peer ${shortId} has: ${data.contentId}`);
                     contentDHT.addPeer(data.contentId, connection.peer);
+                    if (data.sync) this.requestIfMissing(data.contentId, connection);
                     
                     // Update last seen
                     const username = presenceManager.getUserByPeerId(connection.peer);
@@ -113,6 +115,18 @@ class PeerManager {
                 this.handleBinaryEntryReceived(data, connection);
                 break;
         }
+    }
+
+    // Catch up on links that were added before this browser joined
+    async requestIfMissing(contentId, connection) {
+        if (this.requested.has(contentId)) return;
+        const { getAllEntries } = await import('../storage/db.js');
+        const { extractSlug } = await import('../../shared/urlParser.js');
+        const entries = await getAllEntries();
+        if (entries.some((e) => extractSlug(e.sourceURL) === contentId)) return;
+        if (this.requested.has(contentId)) return;
+        this.requested.add(contentId);
+        connection.send({ type: 'request_entry', contentId });
     }
 
     async handleEntryRequest(contentId, connection) {

@@ -2,11 +2,13 @@
 import { openDB } from 'idb';
 import { extractTitle } from '../../shared/urlParser.js';
 
-const DB_NAME = 'webtorrent-metadata-db';
+const DB_NAME = 'webtorrent-metadata-db-v2';
 const STORE_NAME = 'entries';
 const STATS_STORE = 'stats';
 
 let db;
+let markReady;
+const dbReady = new Promise((resolve) => { markReady = resolve; });
 
 export async function initDB() {
     db = await openDB(DB_NAME, 4, {
@@ -32,6 +34,7 @@ export async function initDB() {
         },
     });
     
+    markReady();
     console.log('✅ Database initialized (v4)');
 }
 
@@ -70,11 +73,13 @@ export async function searchEntries(query) {
 }
 
 export async function getEntryByURL(url) {
+    await dbReady;
     const allEntries = await db.getAll(STORE_NAME);
     return allEntries.find(e => e.sourceURL === url);
 }
 
 export async function getAllEntries() {
+    await dbReady;
     return await db.getAll(STORE_NAME);
 }
 

@@ -9,13 +9,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:wasm": "cd src/wasm && make",
-    "start:node": "node node/server.js"
+    "start:node": "node node/server.js",
+    "test:sync": "node test/sync-test.mjs"
   },
   "dependencies": {
     "idb": "^8.0.1",
     "peerjs": "^1.5.5"
   },
   "devDependencies": {
+    "playwright": "^1.64.1",
     "vite": "^7.2.4",
     "vite-plugin-node-polyfills": "^0.24.0",
     "vite-plugin-top-level-await": "^1.4.4",
