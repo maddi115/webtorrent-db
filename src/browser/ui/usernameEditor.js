@@ -1,4 +1,4 @@
-// usernameEditor.js - Choose a custom five-letter username
+// usernameEditor.js - Choose a custom username of up to five letters
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
 import { saveAvatar } from '../storage/db.js';

@@ -14,7 +14,7 @@ export function getUsername() {
 }
 
 export function isValidName(name) {
-    return /^[A-Za-z]{5}$/.test(name);
+    return /^[A-Za-z]{1,5}$/.test(name);
 }
 
 export function setUsername(name) {

@@ -11,7 +11,8 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
 
-const APP_URL = 'http://localhost:3000';
+const APP_PORT = 3107;
+const APP_URL = `http://localhost:${APP_PORT}`;
 const WAIT_MS = 45000;
 const ID = Date.now();
 const TEST_ROOM = `test-${ID}`;
@@ -85,7 +86,7 @@ async function countLink(page, url) {
 }
 
 export async function run({ setup } = {}) {
-    await ensureServer(3000, process.execPath, ['node_modules/vite/bin/vite.js', '--port', '3000'], '.');
+    await ensureServer(APP_PORT, process.execPath, ['node_modules/vite/bin/vite.js', '--port', String(APP_PORT), '--strictPort'], '.');
     const browser = await chromium.launch();
     try {
         const a = await openPeer(browser, 'A', setup);
@@ -437,12 +438,12 @@ export async function run({ setup } = {}) {
         await tablePage.click('#name-form button[type="submit"]');
         report('Bad usernames are rejected', await tablePage.isVisible('#name-error'));
 
-        await tablePage.fill('#name-input', 'Adani');
+        await tablePage.fill('#name-input', 'Nova');
         await tablePage.click('#name-form button[type="submit"]');
         await tablePage.waitForFunction(() => (
-            document.getElementById('username-display').textContent.startsWith('Adani#')
+            document.getElementById('username-display').textContent.startsWith('Nova#')
         ), null, { timeout: WAIT_MS });
-        report('Five-letter usernames can be saved', await tablePage.isHidden('#name-modal'));
+        report('Short usernames can be saved', await tablePage.isHidden('#name-modal'));
 
         await tablePage.setInputFiles('#profile-upload', {
             name: 'avatar.png',
