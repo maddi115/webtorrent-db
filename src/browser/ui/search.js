@@ -3,7 +3,7 @@ import { searchEntries, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
-import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
+import { extractSlug, isURL } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
 import { logger } from '../../shared/logger.js';
 import { escapeHTML, MAX_THUMB_CHARS, safeImage, safeLink, safeThumbHash } from '../../shared/safe.js';
@@ -18,6 +18,9 @@ const threadStates = {};
 const threadPageStates = {};
 const PEERS_PER_PAGE = 13;
 const THREAD_ENTRIES_PER_PAGE = 8;
+const WHO_HAS_LIMIT = 50;
+const resultSlugs = new Map();
+let lastWhoHasKey = '';
 
 function createSafeId(str) {
     return str.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50);
@@ -51,11 +54,9 @@ async function performSearch(query) {
     await trackSearch(query);
     
     let results = [];
-    let contentId;
     
     if (isURL(query)) {
         const slug = extractSlug(query);
-        contentId = slug;
         
         const matches = await searchEntries(slug);
         results = matches.filter(e => 
@@ -65,36 +66,37 @@ async function performSearch(query) {
             )
         );
     } else {
-        contentId = normalizeSearchQuery(query);
         results = await searchEntries(query);
     }
     
-    contentDHT.queryContent(contentId);
-    
-    setTimeout(() => {
-        const peersWithContent = contentDHT.findPeers(contentId);
-        
-        if (peersWithContent.length > 0) {
-            const connectedPeersWithContent = peersWithContent.filter(peerId => 
-                peerManager.hasPeer(peerId)
-            );
-            
-            if (connectedPeersWithContent.length > 0) {
-                connectedPeersWithContent.forEach(peerId => {
-                    const peer = peerManager.getPeer(peerId);
-                    if (peer && peer.open) {
-                        peer.send({
-                            type: 'request_entry',
-                            contentId: contentId
-                        });
-                    }
-                });
-            }
-        }
-    }, 1000);
-    
+    askWhoHas(results);
+
     await displayResults(results, resultsContainer);
 }
+
+// Asks once for what is on screen, so typing does not flood peers
+function askWhoHas(results) {
+    const entries = results.slice(0, WHO_HAS_LIMIT);
+    const key = entries.map((entry) => entry.entryId).join('|');
+    if (!key || key === lastWhoHasKey) return;
+
+    lastWhoHasKey = key;
+    resultSlugs.clear();
+    entries.forEach((entry) => resultSlugs.set(entry.entryId, extractSlug(entry.sourceURL)));
+    peerManager.broadcast({ type: 'who_has', ids: entries.map((entry) => entry.entryId) });
+}
+
+window.addEventListener('peer-has-ids', ({ detail }) => {
+    let changed = false;
+    detail.ids.forEach((id) => {
+        const slug = resultSlugs.get(id);
+        if (slug && !contentDHT.findPeers(slug).includes(detail.peerId)) {
+            contentDHT.addPeer(slug, detail.peerId);
+            changed = true;
+        }
+    });
+    if (changed) refreshResults();
+});
 
 async function displayResults(results, container) {
     if (!results.length) {

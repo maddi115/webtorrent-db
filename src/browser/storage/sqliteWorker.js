@@ -13,6 +13,7 @@ const ENTRY_COLUMNS = `
 
 let db;
 let storageMode = 'opfs';
+const syncIndexes = new Map();
 
 const SCHEMA = `
     CREATE TABLE IF NOT EXISTS entries (
@@ -108,7 +109,42 @@ function selectOne(sql, bind = []) {
     return selectAll(sql, bind)[0] || null;
 }
 
+// Sorted IDs plus running totals make any fingerprint very quick to read
+function getSyncIndex(room) {
+    if (syncIndexes.has(room)) return syncIndexes.get(room);
+
+    const ids = db.selectValues('SELECT entry_id FROM entries WHERE room = ? ORDER BY entry_id', [room]);
+    const totals = new Uint32Array((ids.length + 1) * 4);
+
+    ids.forEach((id, index) => {
+        for (let part = 0; part < 4; part++) {
+            const value = parseInt(id.slice(part * 8, part * 8 + 8), 16) || 0;
+            totals[(index + 1) * 4 + part] = totals[index * 4 + part] ^ value;
+        }
+    });
+
+    const index = { ids, totals };
+    syncIndexes.set(room, index);
+    return index;
+}
+
+function firstIndexAtOrAfter(ids, value) {
+    let low = 0;
+    let high = ids.length;
+    while (low < high) {
+        const middle = (low + high) >> 1;
+        if (ids[middle] < value) low = middle + 1;
+        else high = middle;
+    }
+    return low;
+}
+
+function getPrefixRange(ids, prefix) {
+    return [firstIndexAtOrAfter(ids, prefix), firstIndexAtOrAfter(ids, `${prefix}g`)];
+}
+
 function insertEntry(entry) {
+    syncIndexes.delete(entry.room || 'general');
     db.exec({
         sql: `INSERT OR IGNORE INTO entries (
             entry_id, room, source_url, magnet, instant_io_link, title,
@@ -214,6 +250,33 @@ const methods = {
              LIMIT ${SEARCH_LIMIT}`,
             [room, pattern, pattern]
         );
+    },
+
+    getSyncFingerprints(room, prefixes) {
+        const { ids, totals } = getSyncIndex(room);
+
+        return prefixes.map((prefix) => {
+            const [start, end] = getPrefixRange(ids, prefix);
+            let fingerprint = '';
+            for (let part = 0; part < 4; part++) {
+                const value = (totals[start * 4 + part] ^ totals[end * 4 + part]) >>> 0;
+                fingerprint += value.toString(16).padStart(8, '0');
+            }
+            return { p: prefix, c: end - start, f: fingerprint };
+        });
+    },
+
+    getSyncIds(room, prefix) {
+        const { ids } = getSyncIndex(room);
+        const [start, end] = getPrefixRange(ids, prefix);
+        return ids.slice(start, end);
+    },
+
+    getExistingIds(ids) {
+        return ids.filter((id) => db.selectValue(
+            'SELECT 1 FROM entries WHERE entry_id = ?',
+            [id]
+        ) === 1);
     },
 
     getThumbsWithoutHash() {

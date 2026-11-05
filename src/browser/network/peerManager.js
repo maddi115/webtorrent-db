@@ -10,8 +10,10 @@ import { extractSlug } from '../../shared/urlParser.js';
 import { MAX_AVATAR_CHARS, MAX_PREVIEW_CHARS, safeImage, shortText } from '../../shared/safe.js';
 import { renderPeerTable } from '../ui/peerTable.js';
 import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
+import { handleFingerprints, handleLists, startSync } from './smartSync.js';
 
 const MAX_SYNC_ITEMS = 5000;
+const MAX_WHO_HAS = 50;
 const REQUEST_RETRY_MS = 15000;
 
 class PeerManager {
@@ -73,7 +75,7 @@ class PeerManager {
             joinedAt: connection.joinedAt,
             bridge: connection.bridge
         });
-        this.sendSyncList(connection);
+        startSync(connection);
         this.statusChanged();
     }
 
@@ -89,11 +91,6 @@ class PeerManager {
         this.profiles.delete(peerId);
         this.statusChanged();
         this.onMembersChanged();
-    }
-
-    async sendSyncList(connection) {
-        const { getEntrySummaries } = await import('../storage/db.js');
-        connection.send({ type: 'sync_ids', items: await getEntrySummaries() });
     }
 
     async statusChanged() {
@@ -124,8 +121,20 @@ class PeerManager {
                 this.handlePeerStatus(data, connection);
                 break;
 
-            case 'sync_ids':
-                this.handleSyncList(data, connection);
+            case 'sync_fingerprints':
+                handleFingerprints(data, connection);
+                break;
+
+            case 'sync_lists':
+                handleLists(data, connection, (ids, peer) => this.requestMissing(ids, peer));
+                break;
+
+            case 'who_has':
+                this.handleWhoHas(data, connection);
+                break;
+
+            case 'has_ids':
+                this.handleHasIds(data, connection);
                 break;
 
             case 'request_entries':
@@ -140,12 +149,6 @@ class PeerManager {
                     if (username) {
                         presenceManager.updateLastSeen(username);
                     }
-                }
-                break;
-
-            case 'query':
-                if (data.contentId && contentDHT.hasContent(data.contentId)) {
-                    connection.send({ type: 'announce', contentId: data.contentId });
                 }
                 break;
 
@@ -211,26 +214,37 @@ class PeerManager {
         renderPeerTable();
     }
 
-    async handleSyncList(data, connection) {
-        if (!Array.isArray(data.items)) return;
-        const { getEntryById } = await import('../storage/db.js');
-        const missing = [];
+    requestMissing(ids, connection) {
+        const missing = ids.slice(0, MAX_SYNC_ITEMS).filter((id) => !this.requested.has(id));
 
-        for (const item of data.items.slice(0, MAX_SYNC_ITEMS)) {
-            if (typeof item?.id !== 'string') continue;
-            if (typeof item.slug === 'string' && item.slug) {
-                contentDHT.addPeer(item.slug, connection.peer);
-            }
-            if (!this.requested.has(item.id) && !(await getEntryById(item.id))) {
-                this.requested.add(item.id);
-                setTimeout(() => this.requested.delete(item.id), REQUEST_RETRY_MS);
-                missing.push(item.id);
-            }
-        }
+        missing.forEach((id) => {
+            this.requested.add(id);
+            setTimeout(() => this.requested.delete(id), REQUEST_RETRY_MS);
+        });
 
         if (missing.length) {
             connection.send({ type: 'request_entries', ids: missing });
         }
+    }
+
+    async handleWhoHas(data, connection) {
+        if (!Array.isArray(data.ids)) return;
+        const { getExistingIds } = await import('../storage/db.js');
+        const ids = data.ids
+            .slice(0, MAX_WHO_HAS)
+            .filter((id) => typeof id === 'string');
+
+        const existing = await getExistingIds(ids);
+        if (existing.length) {
+            connection.send({ type: 'has_ids', ids: existing });
+        }
+    }
+
+    handleHasIds(data, connection) {
+        if (!Array.isArray(data.ids)) return;
+        window.dispatchEvent(new CustomEvent('peer-has-ids', {
+            detail: { ids: data.ids, peerId: connection.peer }
+        }));
     }
 
     async handleEntriesRequest(data, connection) {

@@ -27,14 +27,6 @@ class ContentDHT {
         return Array.from(this.contentToPeers.get(contentId) || []);
     }
 
-    queryContent(contentId) {
-        logger.info(`🔍 Querying peers for: ${contentId}`);
-        peerManager.broadcast({
-            type: 'query',
-            contentId: contentId
-        });
-    }
-
     hasContent(contentId) {
         return this.contentToPeers.has(contentId) && this.contentToPeers.get(contentId).size > 0;
     }

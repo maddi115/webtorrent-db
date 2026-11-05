@@ -257,6 +257,50 @@ export async function run({ setup } = {}) {
         await h.selectOption('#room-select', 'music');
         report('Same topic gets the link', Boolean(await hasLink(h, u9)));
 
+        const syncOptions = `testRoom=${TEST_ROOM}-smart`;
+        const seedSyncLinks = async (page, onlyHere) => page.evaluate(async ({ only, time }) => {
+            const { importEntries, updateEntryCount } = await import('/src/browser/storage/db.js');
+            const { getEntryId } = await import('/src/shared/entryId.js');
+            const makeEntry = async (name) => {
+                const entry = {
+                    sourceURL: `https://example.com/t/${name}/1`, title: name, addedBy: 'Sync Test',
+                    timestamp: time, room: 'general', magnet: null, hasPreview: false
+                };
+                entry.entryId = await getEntryId(entry);
+                return entry;
+            };
+            const shared = Array.from({ length: 2000 }, (_, i) => makeEntry(`shared-link-${i}`));
+            const extras = Array.from({ length: 5 }, (_, i) => makeEntry(`${only}-${i}`));
+            await importEntries(await Promise.all([...shared, ...extras]));
+            await updateEntryCount();
+        }, { only: onlyHere, time: ID });
+
+        const seedPeer = async (name, onlyHere) => {
+            const context = await browser.newContext();
+            if (setup) await setup(context);
+            const page = await context.newPage();
+            page.on('pageerror', (error) => console.log(`  [${name} error] ${error.message}`));
+            await page.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-solo-${name}`);
+            await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
+            await seedSyncLinks(page, onlyHere);
+            await page.goto(`${APP_URL}/?${syncOptions}`);
+            await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
+            return { page, context };
+        };
+        const [syncA, syncB] = await Promise.all([seedPeer('SyncA', 'only-a'), seedPeer('SyncB', 'only-b')]);
+        await Promise.all([waitForPeers(syncA.page, 1), waitForPeers(syncB.page, 1)]);
+        const aGot = await hasLink(syncA.page, 'https://example.com/t/only-b-3/1');
+        const bGot = await hasLink(syncB.page, 'https://example.com/t/only-a-3/1');
+        report('Smart sync swaps only what is missing', Boolean(aGot && bGot));
+        const syncBytes = await Promise.all([syncA.page, syncB.page].map((page) => page.evaluate(async () => {
+            const { syncStats } = await import('/src/browser/network/smartSync.js');
+            return syncStats.sentBytes;
+        })));
+        const totalSyncBytes = syncBytes[0] + syncBytes[1];
+        report('Sync traffic stays small', totalSyncBytes < 30000, `${totalSyncBytes} bytes for 2005 links`);
+        await syncA.context.close();
+        await syncB.context.close();
+
         await a.reload();
         await a.waitForFunction(() => document.getElementById('username-display')?.textContent);
         report('Links survive a page reload', Boolean(await hasLink(a, u1)));

@@ -1,6 +1,5 @@
 // db.js - The app's database, stored in SQLite inside a worker
 import { openDB } from 'idb';
-import { extractSlug } from '../../shared/urlParser.js';
 import { getEntryId } from '../../shared/entryId.js';
 import { makeThumbHash, resizeImage } from '../../shared/images.js';
 import { getTopic } from '../../shared/rooms.js';
@@ -109,9 +108,20 @@ export function getRoomEntries() {
     return ready('getRoomEntries', getTopic());
 }
 
-export async function getEntrySummaries() {
-    const links = await ready('getRoomLinks', getTopic());
-    return links.map(({ id, sourceURL }) => ({ id, slug: extractSlug(sourceURL) }));
+export function getSyncFingerprints(prefixes) {
+    return ready('getSyncFingerprints', getTopic(), prefixes);
+}
+
+export function getSyncIds(prefix) {
+    return ready('getSyncIds', getTopic(), prefix);
+}
+
+export function getExistingIds(ids) {
+    return ready('getExistingIds', ids);
+}
+
+export function importEntries(entries) {
+    return ready('importEntries', entries);
 }
 
 export function getEntryCount() {
