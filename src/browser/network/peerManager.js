@@ -224,11 +224,22 @@ class PeerManager {
 
         const username = shortText(data.username, 100);
         if (username) {
+            if (profile.username !== username) {
+                presenceManager.setOffline(profile.username);
+            }
             profile.username = username;
             presenceManager.setOnline(username, connection.peer);
         }
         profile.avatar = safeImage(data.avatar, MAX_AVATAR_CHARS);
         renderPeerTable();
+
+        if (username && profile.avatar) {
+            import('../storage/db.js').then(async ({ saveAvatar }) => {
+                await saveAvatar(username, profile.avatar);
+                const { refreshResults } = await import('../ui/search.js');
+                refreshResults();
+            });
+        }
     }
 
     handlePeerStatus(data, connection) {

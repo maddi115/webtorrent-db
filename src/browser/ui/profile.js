@@ -1,7 +1,10 @@
 // profile.js - Pick a profile picture
 import { resizeImage } from '../../shared/images.js';
 import { getAvatar, setAvatar } from '../../shared/profile.js';
+import { saveAvatar } from '../storage/db.js';
+import { getUsername } from '../../shared/username.js';
 import { renderPeerTable } from './peerTable.js';
+import { refreshResults } from './search.js';
 
 function showAvatar() {
     const image = document.getElementById('profile-image');
@@ -18,6 +21,7 @@ export function initProfile() {
     const input = document.getElementById('profile-upload');
 
     showAvatar();
+    if (getAvatar()) saveAvatar(getUsername(), getAvatar());
     button.addEventListener('click', () => input.click());
 
     input.addEventListener('change', async () => {
@@ -29,8 +33,9 @@ export function initProfile() {
         input.value = '';
 
         const { peerManager } = await import('../network/peerManager.js');
-        const { getUsername } = await import('../../shared/username.js');
+        await saveAvatar(getUsername(), avatar);
         peerManager.broadcast({ type: 'profile', username: getUsername(), avatar });
         renderPeerTable();
+        refreshResults();
     });
 }

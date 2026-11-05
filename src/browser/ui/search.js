@@ -1,11 +1,13 @@
 // search.js - Search links and show them in a compact black table
-import { searchEntries, trackDownload, trackSearch, getStats } from '../storage/db.js';
+import { getAvatars, searchEntries, trackDownload, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
 import { extractSlug, isURL } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
-import { escapeHTML, MAX_THUMB_CHARS, safeImage, safeLink, safeThumbHash } from '../../shared/safe.js';
+import {
+    escapeHTML, MAX_AVATAR_CHARS, MAX_THUMB_CHARS, safeImage, safeLink, safeThumbHash
+} from '../../shared/safe.js';
 import { thumbHashToImage } from '../../shared/images.js';
 import { openPreview } from './preview.js';
 import { watchThumbnails } from './thumbnails.js';
@@ -131,7 +133,14 @@ function renderActions(entry) {
     return buttons.join('') || '<span class="result-muted">No link</span>';
 }
 
-async function renderRow(entry) {
+function renderAvatar(username, avatars) {
+    const avatar = safeImage(avatars[username], MAX_AVATAR_CHARS);
+    if (avatar) return `<img class="result-avatar" src="${avatar}" alt="">`;
+
+    return `<span class="result-avatar result-avatar-empty" aria-hidden="true">${escapeHTML(username.charAt(0).toUpperCase())}</span>`;
+}
+
+async function renderRow(entry, avatars) {
     const slug = extractSlug(entry.sourceURL);
     const stats = await getStats(slug);
     const peers = contentDHT.findPeers(slug).length;
@@ -144,7 +153,13 @@ async function renderRow(entry) {
             <a class="url-title" href="${escapeHTML(safeLink(entry.sourceURL))}" target="_blank" rel="noopener noreferrer">${escapeHTML(entry.title || 'Untitled')}</a>
             <span class="result-host">${escapeHTML(getHostname(entry.sourceURL))}</span>
         </td>
-        <td class="result-user"><span class="result-dot ${online ? 'online' : ''}" aria-label="${online ? 'Online' : 'Offline'}"></span>${escapeHTML(username)}</td>
+        <td class="result-user">
+            <span class="result-user-row">
+                ${renderAvatar(username, avatars)}
+                <span class="result-user-name">${escapeHTML(username)}</span>
+                <span class="result-dot ${online ? 'online' : ''}" role="img" aria-label="${online ? 'Online' : 'Offline'}"></span>
+            </span>
+        </td>
         <td class="result-number">${peers}</td>
         <td class="result-number">${stats.downloads}</td>
         <td class="result-actions">${renderActions(entry)}</td>
@@ -162,9 +177,10 @@ async function renderResults() {
     const totalPages = Math.ceil(currentResults.length / ROWS_PER_PAGE);
     currentPage = Math.min(currentPage, totalPages);
     const start = (currentPage - 1) * ROWS_PER_PAGE;
-    const rows = await Promise.all(
-        currentResults.slice(start, start + ROWS_PER_PAGE).map(renderRow)
-    );
+    const pageResults = currentResults.slice(start, start + ROWS_PER_PAGE);
+    const usernames = [...new Set(pageResults.map((entry) => entry.addedBy || 'Anonymous'))];
+    const avatars = await getAvatars(usernames);
+    const rows = await Promise.all(pageResults.map((entry) => renderRow(entry, avatars)));
     const label = `${currentResults.length} result${currentResults.length === 1 ? '' : 's'}`;
 
     container.innerHTML = `<section class="results-panel" aria-label="Search results">

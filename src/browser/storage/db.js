@@ -132,6 +132,14 @@ export function importSnapshot(room, bytes, hash) {
     return ready('importSnapshot', room, bytes, hash);
 }
 
+export function saveAvatar(username, avatar) {
+    return ready('saveAvatar', username, avatar);
+}
+
+export function getAvatars(usernames) {
+    return ready('getAvatars', usernames);
+}
+
 export function importEntries(entries) {
     return ready('importEntries', entries);
 }

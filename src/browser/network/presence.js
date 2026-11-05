@@ -15,6 +15,13 @@ class PresenceManager {
         logger.info(`👤 Marked self as ONLINE: ${this.myUsername}`);
     }
     
+    rename(username) {
+        const oldName = this.myUsername;
+        this.myUsername = username;
+        this.userPresence.delete(oldName);
+        this.setOnline(username, 'self');
+    }
+
     setOnline(username, peerId) {
         logger.info(`👤 ${username} is now ONLINE (${peerId})`);
         this.userPresence.set(username, {

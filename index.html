@@ -37,7 +37,7 @@
                         <img id="profile-image" alt="">
                     </button>
                     <input id="profile-upload" type="file" accept="image/*" hidden>
-                    <span id="username-display" class="username"></span>
+                    <button id="username-display" class="username username-button" type="button"></button>
                 </div>
             </div>
             
@@ -65,6 +65,18 @@
             <span>Shared: <span id="shared-links">0</span> links (<span id="shared-bytes">0 B</span>)</span>
             <button id="seed-toggle" class="seed-toggle" type="button" aria-pressed="false" title="Keeps this PC awake while this tab shares with the room">Seeding: off</button>
         </footer>
+    </div>
+
+    <div id="name-modal" class="name-modal" hidden>
+        <form id="name-form" class="name-panel" aria-label="Change username">
+            <label for="name-input">Five-letter username</label>
+            <input id="name-input" type="text" maxlength="5" autocomplete="off" spellcheck="false" placeholder="Adani">
+            <p id="name-error" class="name-error" hidden>Use exactly 5 letters, A to Z.</p>
+            <div class="name-actions">
+                <button id="name-cancel" type="button">Cancel</button>
+                <button type="submit">Save</button>
+            </div>
+        </form>
     </div>
 
     <button id="peer-bar" class="peer-bar" type="button" aria-haspopup="dialog" aria-controls="peer-modal" aria-expanded="false">

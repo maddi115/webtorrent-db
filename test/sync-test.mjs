@@ -407,7 +407,8 @@ export async function run({ setup } = {}) {
                 const entry = {
                     sourceURL: `https://example.com/t/table-row-${index}/${index}`, title: `Table Row ${index}`,
                     addedBy: 'Table Test', timestamp: time + index, room: 'general',
-                    magnet: `magnet:?xt=urn:btih:${index.toString(16).padStart(40, '0')}`, hasPreview: false
+                    magnet: `magnet:?xt=urn:btih:${index.toString(16).padStart(40, '0')}`, hasPreview: false,
+                    instantIOLink: `https://instant.io/#${index}`
                 };
                 entry.entryId = await getEntryId(entry);
                 return entry;
@@ -425,6 +426,35 @@ export async function run({ setup } = {}) {
             document.querySelectorAll('.results-table tbody tr').length === 5
         ), null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
         report('Results table has pages', nextResults);
+        report('Results table is 720 wide', await tablePage.evaluate(() => {
+            const panel = document.querySelector('.results-panel');
+            const scroll = document.querySelector('.results-scroll');
+            return panel.getBoundingClientRect().width === 720 && scroll.scrollWidth <= scroll.clientWidth;
+        }));
+
+        await tablePage.click('#username-display');
+        await tablePage.fill('#name-input', 'Ab1');
+        await tablePage.click('#name-form button[type="submit"]');
+        report('Bad usernames are rejected', await tablePage.isVisible('#name-error'));
+
+        await tablePage.fill('#name-input', 'Adani');
+        await tablePage.click('#name-form button[type="submit"]');
+        await tablePage.waitForFunction(() => (
+            document.getElementById('username-display').textContent.startsWith('Adani#')
+        ), null, { timeout: WAIT_MS });
+        report('Five-letter usernames can be saved', await tablePage.isHidden('#name-modal'));
+
+        await tablePage.setInputFiles('#profile-upload', {
+            name: 'avatar.png',
+            mimeType: 'image/png',
+            buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+        });
+        const avatarURL = `https://example.com/t/avatar-row-${ID}/1`;
+        await addLink(tablePage, avatarURL, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        await tablePage.fill('#search-input', `avatar-row-${ID}`);
+        const avatarInResults = await tablePage.waitForSelector('img.result-avatar', { timeout: WAIT_MS })
+            .then(() => true).catch(() => false);
+        report('Profile pictures show in results', avatarInResults);
         await tablePage.close();
 
         const snapshot = await a.evaluate(async () => {

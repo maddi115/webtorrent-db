@@ -13,6 +13,10 @@ export function getUsername() {
     return username;
 }
 
+export function isValidName(name) {
+    return /^[A-Za-z]{5}$/.test(name);
+}
+
 export function setUsername(name) {
     const discriminator = generateDiscriminator();
     const emoji = getRandomEmoji();

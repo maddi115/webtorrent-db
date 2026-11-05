@@ -63,6 +63,10 @@ const SCHEMA = `
         searches INTEGER NOT NULL DEFAULT 0,
         downloads INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS avatars (
+        username TEXT PRIMARY KEY,
+        avatar TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -343,6 +347,23 @@ const methods = {
 
         db.transaction(() => entries.forEach(insertEntry));
         return entries.length;
+    },
+
+    saveAvatar(username, avatar) {
+        db.exec({
+            sql: 'INSERT OR REPLACE INTO avatars (username, avatar) VALUES (?, ?)',
+            bind: [username, avatar]
+        });
+    },
+
+    getAvatars(usernames) {
+        return Object.fromEntries(usernames.flatMap((username) => {
+            const avatar = db.selectValue(
+                'SELECT avatar FROM avatars WHERE username = ?',
+                [username]
+            );
+            return avatar ? [[username, avatar]] : [];
+        }));
     },
 
     getThumbsWithoutHash() {

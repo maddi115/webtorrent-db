@@ -4,6 +4,7 @@ import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initProfile } from './browser/ui/profile.js';
 import { initRoomPicker } from './browser/ui/roomPicker.js';
+import { initUsernameEditor } from './browser/ui/usernameEditor.js';
 import { initSeedingMode } from './browser/ui/seedingMode.js';
 import { renderShareStats } from './shared/shareStats.js';
 import { initPeerTable } from './browser/ui/peerTable.js';
@@ -60,6 +61,7 @@ async function init() {
     if (usernameDisplay) {
         usernameDisplay.textContent = username;
     }
+    initUsernameEditor();
     
     logger.info('✅ UI ready');
     logger.info('🎉 Browser node ready with WebTorrent streaming!');
