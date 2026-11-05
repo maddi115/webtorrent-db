@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 const APP_URL = 'http://localhost:3000';
 const WAIT_MS = 45000;
 const ID = Date.now();
+const TEST_ROOM = `test-${ID}`;
 const results = [];
 const children = [];
 
@@ -36,12 +37,12 @@ async function ensureServer(port, command, args, cwd) {
     throw new Error(`Server on port ${port} did not start`);
 }
 
-async function openPeer(browser, name, setup) {
+async function openPeer(browser, name, setup, options = `testRoom=${TEST_ROOM}`) {
     const context = await browser.newContext(); // fresh profile = empty database
     if (setup) await setup(context);
     const page = await context.newPage();
     page.on('pageerror', (e) => console.log(`  [${name} error] ${e.message}`));
-    await page.goto(APP_URL);
+    await page.goto(`${APP_URL}/?${options}`);
     await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
     return page;
 }
@@ -218,6 +219,38 @@ export async function run({ setup } = {}) {
         report('Pagination shows the next users', pageTwo);
         await c.click('#peer-close');
         report('Late joiner receives existing links', !!(await hasLink(c, u1)));
+
+        const splitOptions = `testRoom=${TEST_ROOM}-split&capacity=2`;
+        const d = await openPeer(browser, 'D', setup, splitOptions);
+        const e = await openPeer(browser, 'E', setup, splitOptions);
+        await Promise.all([waitForPeers(d, 1), waitForPeers(e, 1)]);
+        const f = await openPeer(browser, 'F', setup, splitOptions);
+        const roomText = (page) => page.evaluate(() => document.getElementById('peer-room-name').textContent);
+        const moved = await f.waitForFunction(
+            () => document.getElementById('peer-room-name').textContent === 'general 2',
+            null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Full room splits automatically', moved, await roomText(f));
+
+        await waitForPeers(f, 1);
+        const u7 = `https://example.com/t/fake-link-g-${ID}/7`;
+        const u8 = `https://example.com/t/fake-link-h-${ID}/8`;
+        await addLink(e, u7, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        await addLink(f, u8, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        report('Links cross into the split room', Boolean(await hasLink(f, u7)));
+        report('Links cross back from the split room', Boolean(await hasLink(e, u8)));
+
+        const musicOptions = `testRoom=${TEST_ROOM}-topics`;
+        const g = await openPeer(browser, 'G', setup, musicOptions);
+        const h = await openPeer(browser, 'H', setup, musicOptions);
+        await Promise.all([waitForPeers(g, 1), waitForPeers(h, 1)]);
+        const u9 = `https://example.com/t/fake-link-i-${ID}/9`;
+        await g.selectOption('#room-select', 'music');
+        await new Promise((r) => setTimeout(r, 1000));
+        await addLink(g, u9, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        await new Promise((r) => setTimeout(r, 3000));
+        report('Other topics do not get the link', await countLink(h, u9) === 0);
+        await h.selectOption('#room-select', 'music');
+        report('Same topic gets the link', Boolean(await hasLink(h, u9)));
 
         await a.reload();
         await waitForPeers(a, 2);

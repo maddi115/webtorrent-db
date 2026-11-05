@@ -3,6 +3,7 @@ import './browser/network/dht.js';
 import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initProfile } from './browser/ui/profile.js';
+import { initRoomPicker } from './browser/ui/roomPicker.js';
 import { initPeerTable } from './browser/ui/peerTable.js';
 import { initDB } from './browser/storage/db.js';
 import { initWASM } from './browser/wasm/wasmLoader.js';
@@ -32,6 +33,7 @@ async function init() {
     
     initUI();
     initAddEntry();
+    initRoomPicker();
     initProfile();
     initPeerTable();
     

@@ -4,6 +4,7 @@ import { gossipBinary } from '../network/gossipBinary.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
+import { getTopic } from '../../shared/rooms.js';
 import { getEntryId } from '../../shared/entryId.js';
 import { resizeImage } from '../../shared/images.js';
 
@@ -57,7 +58,8 @@ export function initAddEntry() {
             thumb: previewFile ? await resizeImage(previewFile, 160, 0.7) : null,
             hasPreview: Boolean(previewFile),
             title: title,
-            addedBy: username
+            addedBy: username,
+            room: getTopic()
         };
         entry.entryId = await getEntryId(entry);
         

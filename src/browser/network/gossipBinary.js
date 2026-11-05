@@ -5,6 +5,7 @@ import { contentDHT } from './contentDHT.js';
 import { extractSlug } from '../../shared/urlParser.js';
 import { getEntryId, toPublicEntry } from '../../shared/entryId.js';
 import { MAX_THUMB_CHARS, safeImage, safeLink, shortText } from '../../shared/safe.js';
+import { getTopic, isTopic } from '../../shared/rooms.js';
 import { logger } from '../../shared/logger.js';
 
 class GossipEngine {
@@ -20,8 +21,10 @@ class GossipEngine {
         peerManager.broadcast({ type: 'entry', entry: toPublicEntry(entry) });
     }
 
-    async receiveEntry(rawEntry) {
+    async receiveEntry(rawEntry, sourcePeerId) {
         if (typeof rawEntry?.sourceURL !== 'string' || !rawEntry.sourceURL) return;
+        const room = rawEntry.room || 'general';
+        if (!isTopic(room) || room !== getTopic()) return;
         if (!Number.isFinite(rawEntry.timestamp)) return;
 
         const entry = {
@@ -33,7 +36,8 @@ class GossipEngine {
             timestamp: rawEntry.timestamp,
             thumb: safeImage(rawEntry.thumb, MAX_THUMB_CHARS),
             hasPreview: rawEntry.hasPreview === true,
-            preview: null
+            preview: null,
+            room
         };
         entry.entryId = await getEntryId(entry);
 
@@ -46,6 +50,7 @@ class GossipEngine {
             await addEntry(entry);
             logger.info('✅ Entry saved to local DB');
             contentDHT.announceContent(extractSlug(entry.sourceURL));
+            peerManager.forwardEntry(toPublicEntry(entry), sourcePeerId);
 
             const { refreshResults } = await import('../ui/search.js');
             refreshResults();

@@ -3,6 +3,7 @@ import { openDB } from 'idb';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getEntryId } from '../../shared/entryId.js';
 import { resizeImage } from '../../shared/images.js';
+import { getEntryTopic, getTopic } from '../../shared/rooms.js';
 
 const DB_NAME = 'webtorrent-metadata-db-v2';
 const STORE_NAME = 'entries';
@@ -66,8 +67,13 @@ export async function getEntryById(entryId) {
     return db.getFromIndex(STORE_NAME, 'entryId', entryId);
 }
 
-export async function getEntrySummaries() {
+export async function getRoomEntries() {
     const entries = await getAllEntries();
+    return entries.filter((entry) => getEntryTopic(entry) === getTopic());
+}
+
+export async function getEntrySummaries() {
+    const entries = await getRoomEntries();
     return entries.map((entry) => ({
         id: entry.entryId,
         slug: extractSlug(entry.sourceURL)
@@ -75,8 +81,7 @@ export async function getEntrySummaries() {
 }
 
 export async function getEntryCount() {
-    await dbReady;
-    return db.count(STORE_NAME);
+    return (await getRoomEntries()).length;
 }
 
 export async function savePreview(entryId, preview) {
@@ -115,7 +120,7 @@ export async function addEntry(entry) {
 }
 
 export async function searchEntries(query) {
-    const allEntries = await db.getAll(STORE_NAME);
+    const allEntries = await getRoomEntries();
     return allEntries.filter(e => 
         e.sourceURL.toLowerCase().includes(query.toLowerCase()) || 
         e.title?.toLowerCase().includes(query.toLowerCase())
@@ -133,8 +138,8 @@ export async function getAllEntries() {
     return await db.getAll(STORE_NAME);
 }
 
-async function updateEntryCount() {
-    const count = await db.count(STORE_NAME);
+export async function updateEntryCount() {
+    const count = await getEntryCount();
     const countEl = document.getElementById('entry-count');
     if (countEl) countEl.textContent = count;
     console.log('📊 Total entries in DB:', count);

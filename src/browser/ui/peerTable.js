@@ -72,12 +72,13 @@ export async function renderPeerTable() {
 
     const { peerManager } = await import('../network/peerManager.js');
     const { getEntryCount } = await import('../storage/db.js');
-    const { getMyPeerId } = await import('../network/dht.js');
+    const { getMyPeerId, getRoomLabel } = await import('../network/dht.js');
     const profiles = [...peerManager.profiles.entries()];
     const links = await getEntryCount().catch(() => 0);
 
     const mine = peerManager.peers.size;
     const theirs = profiles.reduce((total, [, profile]) => total + profile.connections, 0);
+    document.getElementById('peer-room-name').textContent = getRoomLabel();
     document.getElementById('peer-online-count').textContent = profiles.length + 1;
     document.getElementById('peer-direct-count').textContent = Math.round((mine + theirs) / 2);
 

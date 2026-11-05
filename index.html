@@ -18,6 +18,10 @@
             </header>
             
             <div class="search-row">
+                <label class="room-picker">
+                    <span>Room</span>
+                    <select id="room-select"></select>
+                </label>
                 <input 
                     type="text" 
                     id="search-input" 
@@ -69,6 +73,7 @@
     <div id="peer-modal" class="peer-modal" hidden>
         <section class="peer-panel" role="dialog" aria-modal="true" aria-label="Connected peers">
             <div class="peer-panel-summary">
+                <span>Room: <span id="peer-room-name"></span></span>
                 <span>Online: <span id="peer-online-count">1</span></span>
                 <span>Direct connections: <span id="peer-direct-count">0</span></span>
                 <button id="peer-close" class="peer-close" type="button" aria-label="Close peers table">&times;</button>

@@ -19,6 +19,36 @@ class PeerManager {
         this.peerIds = new Set();
         this.profiles = new Map();
         this.requested = new Set();
+        this.onMembersChanged = () => {};
+    }
+
+    resetRequests() {
+        this.requested.clear();
+    }
+
+    getRoomMembers(roomId) {
+        return [...this.profiles.entries()]
+            .filter(([peerId, profile]) => (
+                this.peers.get(peerId)?.room === roomId
+                && !profile.bridge
+                && Number.isFinite(profile.joinedAt)
+            ))
+            .map(([peerId, profile]) => ({ peerId, joinedAt: profile.joinedAt }));
+    }
+
+    removeRoomPeers(roomId) {
+        [...this.peers.values()]
+            .filter((connection) => connection.room === roomId)
+            .forEach((connection) => this.removePeer(connection.peer));
+    }
+
+    forwardEntry(entry, sourcePeerId) {
+        const sourceRoom = this.peers.get(sourcePeerId)?.room;
+        this.peers.forEach((connection) => {
+            if (connection.room !== sourceRoom) {
+                connection.send({ type: 'entry', entry });
+            }
+        });
     }
 
     addPeer(connection) {
@@ -30,13 +60,17 @@ class PeerManager {
             avatar: null,
             connections: 1,
             links: 0,
-            connectedAt: Date.now()
+            connectedAt: Date.now(),
+            joinedAt: null,
+            bridge: false
         });
 
         connection.send({
             type: 'handshake',
             username: getUsername(),
-            avatar: getAvatar()
+            avatar: getAvatar(),
+            joinedAt: connection.joinedAt,
+            bridge: connection.bridge
         });
         this.sendSyncList(connection);
         this.statusChanged();
@@ -53,6 +87,7 @@ class PeerManager {
         this.peerIds.delete(peerId);
         this.profiles.delete(peerId);
         this.statusChanged();
+        this.onMembersChanged();
     }
 
     async sendSyncList(connection) {
@@ -77,7 +112,7 @@ class PeerManager {
 
         switch (data.type) {
             case 'handshake':
-                this.handleProfile(data, connection);
+                this.handleHandshake(data, connection);
                 break;
 
             case 'profile':
@@ -118,7 +153,7 @@ class PeerManager {
                 break;
 
             case 'entry':
-                gossipBinary.receiveEntry(data.entry);
+                gossipBinary.receiveEntry(data.entry, connection.peer);
                 break;
 
             case 'request_preview':
@@ -129,6 +164,16 @@ class PeerManager {
                 this.handlePreview(data);
                 break;
         }
+    }
+
+    handleHandshake(data, connection) {
+        const profile = this.profiles.get(connection.peer);
+        if (!profile) return;
+
+        profile.joinedAt = Number.isFinite(data.joinedAt) ? data.joinedAt : Date.now();
+        profile.bridge = data.bridge === true;
+        this.handleProfile(data, connection);
+        this.onMembersChanged();
     }
 
     handleProfile(data, connection) {
@@ -192,8 +237,8 @@ class PeerManager {
     }
 
     async handleEntryRequest(contentId, connection) {
-        const { getAllEntries } = await import('../storage/db.js');
-        const entries = await getAllEntries();
+        const { getRoomEntries } = await import('../storage/db.js');
+        const entries = await getRoomEntries();
         const match = entries.find((entry) => extractSlug(entry.sourceURL) === contentId);
 
         if (match) {

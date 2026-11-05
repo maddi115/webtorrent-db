@@ -1,14 +1,16 @@
 // entryId.js - The same link details always make the same ID
 export async function getEntryId(entry) {
-    const text = [
+    const parts = [
         entry.sourceURL,
         entry.magnet || '',
         entry.instantIOLink || '',
         entry.title || '',
         entry.addedBy || '',
         entry.timestamp
-    ].join('\n');
-    const bytes = new TextEncoder().encode(text);
+    ];
+    if (entry.room && entry.room !== 'general') parts.push(entry.room);
+
+    const bytes = new TextEncoder().encode(parts.join('\n'));
     const hash = await crypto.subtle.digest('SHA-256', bytes);
     return Array.from(new Uint8Array(hash).slice(0, 16))
         .map((byte) => byte.toString(16).padStart(2, '0'))

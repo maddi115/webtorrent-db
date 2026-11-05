@@ -983,3 +983,31 @@ button,
 input {
   font-family: inherit;
 }
+
+/* Room picker */
+.room-picker {
+  grid-column: 1;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+
+.room-picker select {
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 1000px) {
+  .room-picker {
+    justify-self: center;
+  }
+}
