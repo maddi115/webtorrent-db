@@ -3,6 +3,10 @@
 // adds fake links, and checks that they reach the other browser.
 // Run with: npm run test:sync
 import { chromium } from 'playwright';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { openHelper } from '../tools/helper.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
@@ -359,6 +363,41 @@ export async function run({ setup } = {}) {
         report('Fake snapshots are rejected', badSnapshotRejected);
         await shareA.context.close();
         await shareB.context.close();
+
+        const sharedText = await a.textContent('#shared-links');
+        report('Sharing stats count sent links', Number(sharedText) > 0, `${sharedText} links`);
+
+        await a.click('#seed-toggle');
+        report('Seeding mode switches on', await a.getAttribute('#seed-toggle', 'aria-pressed') === 'true');
+        await a.click('#seed-toggle');
+
+        const roomPage = await openPeer(browser, 'RoomLink', setup, `testRoom=${TEST_ROOM}-link&room=music`);
+        report('Room links open the right topic', await roomPage.inputValue('#room-select') === 'music');
+        await roomPage.close();
+
+        const helperOptions = `&testRoom=${TEST_ROOM}-helper`;
+        const helperData = mkdtempSync(path.join(tmpdir(), 'webtorrent-helper-'));
+        const helperSettings = {
+            room: 'general', baseURL: APP_URL, dataDir: helperData, query: helperOptions, setup
+        };
+        const helperURL = `https://example.com/t/helper-link-${ID}/1`;
+        let helper = await openHelper(helperSettings);
+        const poster = await openPeer(browser, 'Poster', setup, `testRoom=${TEST_ROOM}-helper`);
+        await waitForPeers(poster, 1);
+        await addLink(poster, helperURL, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        report('Helper saves new links', Boolean(await hasLink(helper.page, helperURL)));
+        await poster.close();
+
+        await helper.context.close();
+        helper = await openHelper(helperSettings);
+        report('Helper keeps links after restarting', Boolean(await hasLink(helper.page, helperURL)));
+
+        const visitor = await openPeer(browser, 'Visitor', setup, `testRoom=${TEST_ROOM}-helper`);
+        await waitForPeers(visitor, 1);
+        report('Helper serves links when nobody else is online', Boolean(await hasLink(visitor, helperURL)));
+        await visitor.close();
+        await helper.context.close();
+        rmSync(helperData, { recursive: true, force: true });
 
         const snapshot = await a.evaluate(async () => {
             const { getEntryId, toPublicEntry } = await import('/src/shared/entryId.js');

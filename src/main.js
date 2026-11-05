@@ -4,6 +4,8 @@ import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initProfile } from './browser/ui/profile.js';
 import { initRoomPicker } from './browser/ui/roomPicker.js';
+import { initSeedingMode } from './browser/ui/seedingMode.js';
+import { renderShareStats } from './shared/shareStats.js';
 import { initPeerTable } from './browser/ui/peerTable.js';
 import { getStorageMode, initDB } from './browser/storage/db.js';
 import { initWASM } from './browser/wasm/wasmLoader.js';
@@ -28,7 +30,10 @@ async function init() {
     await initWASM();
     
     await gossipBinary.init();
-    await downloadManager.init();
+    // Link sharing still works if the download library cannot load
+    await downloadManager.init().catch((error) => {
+        logger.warn('⚠️ Downloads are unavailable', error);
+    });
     
     await initDB();
     logger.info('✅ Storage initialized');
@@ -45,6 +50,8 @@ async function init() {
     initUI();
     initAddEntry();
     initRoomPicker();
+    initSeedingMode();
+    renderShareStats();
     initProfile();
     initPeerTable();
     

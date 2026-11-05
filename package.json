@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "build:wasm": "cd src/wasm && make",
     "start:node": "node node/server.js",
-    "test:sync": "node test/sync-test.mjs"
+    "test:sync": "node test/sync-test.mjs",
+    "helper": "node tools/helper.mjs"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.54.1-build1",

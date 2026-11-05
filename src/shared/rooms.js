@@ -12,6 +12,12 @@ export function isTopic(value) {
 export function getTopic() {
     if (currentTopic) return currentTopic;
 
+    const linkedRoom = new URLSearchParams(location.search).get('room');
+    if (isTopic(linkedRoom)) {
+        currentTopic = linkedRoom;
+        return currentTopic;
+    }
+
     try {
         const saved = localStorage.getItem(TOPIC_KEY);
         currentTopic = isTopic(saved) ? saved : DEFAULT_TOPIC;

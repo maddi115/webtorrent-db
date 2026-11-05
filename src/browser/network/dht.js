@@ -3,6 +3,7 @@
 import { joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';
 import { getTopic, setTopic } from '../../shared/rooms.js';
+import { recordShared } from '../../shared/shareStats.js';
 import { logger } from '../../shared/logger.js';
 
 const APP_ID = 'maddi115-webtorrent-p2p-db';
@@ -33,8 +34,17 @@ function createConnection(peerId, roomId) {
         open: true,
         joinedAt,
         bridge: roomId !== getPrimaryRoom(),
-        send: (message) => rooms.get(roomId)?.messages.send(message, { target: peerId }),
-        sendChunk: (bytes, metadata) => rooms.get(roomId)?.chunks.send(bytes, { target: peerId, metadata })
+        send: (message) => {
+            if (message.type === 'entry') recordShared(1, JSON.stringify(message).length);
+            if (message.type === 'thumb' || message.type === 'preview') {
+                recordShared(0, JSON.stringify(message).length);
+            }
+            return rooms.get(roomId)?.messages.send(message, { target: peerId });
+        },
+        sendChunk: (bytes, metadata) => {
+            recordShared(0, bytes.length);
+            return rooms.get(roomId)?.chunks.send(bytes, { target: peerId, metadata });
+        }
     };
 }
 
