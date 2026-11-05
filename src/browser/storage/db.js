@@ -1,194 +1,141 @@
-// db.js - Add stats tracking
+// db.js - The app's database, stored in SQLite inside a worker
 import { openDB } from 'idb';
-import { extractSlug, extractTitle } from '../../shared/urlParser.js';
+import { extractSlug } from '../../shared/urlParser.js';
 import { getEntryId } from '../../shared/entryId.js';
 import { resizeImage } from '../../shared/images.js';
-import { getEntryTopic, getTopic } from '../../shared/rooms.js';
+import { getTopic } from '../../shared/rooms.js';
 
-const DB_NAME = 'webtorrent-metadata-db-v2';
-const STORE_NAME = 'entries';
-const STATS_STORE = 'stats';
+const OLD_DB_NAME = 'webtorrent-metadata-db-v2';
+const IMPORT_BATCH_SIZE = 200;
 
-let db;
+const worker = new Worker(new URL('./sqliteWorker.js', import.meta.url), { type: 'module' });
+const pending = new Map();
+let nextCallId = 1;
+let storageMode = null;
 let markReady;
 const dbReady = new Promise((resolve) => { markReady = resolve; });
 
-export async function initDB() {
-    db = await openDB(DB_NAME, 5, {
-        upgrade(upgradeDb, oldVersion, newVersion, transaction) {
-            // Entries store
-            if (!upgradeDb.objectStoreNames.contains(STORE_NAME)) {
-                const store = upgradeDb.createObjectStore(STORE_NAME, { 
-                    keyPath: 'id', 
-                    autoIncrement: true 
-                });
-                store.createIndex('sourceURL', 'sourceURL', { unique: false });
-                store.createIndex('timestamp', 'timestamp');
-            }
-
-            const entries = transaction.objectStore(STORE_NAME);
-            if (!entries.indexNames.contains('entryId')) {
-                entries.createIndex('entryId', 'entryId');
-            }
-            
-            // Stats store
-            if (!upgradeDb.objectStoreNames.contains(STATS_STORE)) {
-                const statsStore = upgradeDb.createObjectStore(STATS_STORE, {
-                    keyPath: 'contentId'
-                });
-                statsStore.createIndex('searches', 'searches');
-                statsStore.createIndex('downloads', 'downloads');
-            }
-        },
-    });
-    
-    await backfillEntries();
-    markReady();
-    console.log('✅ Database initialized (v5)');
-}
-
-async function backfillEntries() {
-    const entries = await db.getAll(STORE_NAME);
-
-    for (const entry of entries) {
-        if (entry.entryId && (entry.thumb || !entry.preview)) continue;
-
-        entry.entryId = entry.entryId || await getEntryId(entry);
-        entry.hasPreview = Boolean(entry.preview);
-        if (entry.preview && !entry.thumb) {
-            entry.thumb = await resizeImage(entry.preview, 160, 0.7).catch(() => null);
-        }
-        await db.put(STORE_NAME, entry);
+worker.onmessage = ({ data: { id, result, error } }) => {
+    const call = pending.get(id);
+    pending.delete(id);
+    if (error) {
+        call.reject(new Error(error));
+    } else {
+        call.resolve(result);
     }
+};
+
+function call(method, ...args) {
+    return new Promise((resolve, reject) => {
+        const id = nextCallId++;
+        pending.set(id, { resolve, reject });
+        worker.postMessage({ id, method, args });
+    });
 }
 
-export async function getEntryById(entryId) {
+async function ready(method, ...args) {
     await dbReady;
-    return db.getFromIndex(STORE_NAME, 'entryId', entryId);
+    return call(method, ...args);
 }
 
-export async function getRoomEntries() {
-    const entries = await getAllEntries();
-    return entries.filter((entry) => getEntryTopic(entry) === getTopic());
+async function prepareOldEntry(entry) {
+    const copy = { ...entry };
+    copy.entryId = copy.entryId || await getEntryId(copy);
+    copy.hasPreview = Boolean(copy.preview || copy.hasPreview);
+    if (copy.preview && !copy.thumb) {
+        copy.thumb = await resizeImage(copy.preview, 160, 0.7).catch(() => null);
+    }
+    return copy;
+}
+
+// Copies old links once. The old database stays in place as a backup.
+async function migrateOldDatabase() {
+    if (await call('getMeta', 'indexeddb_migrated')) return;
+
+    const databases = await indexedDB.databases();
+    if (databases.some((database) => database.name === OLD_DB_NAME)) {
+        const oldDb = await openDB(OLD_DB_NAME);
+        const entries = oldDb.objectStoreNames.contains('entries')
+            ? await oldDb.getAll('entries')
+            : [];
+        const stats = oldDb.objectStoreNames.contains('stats')
+            ? await oldDb.getAll('stats')
+            : [];
+        oldDb.close();
+
+        for (let start = 0; start < entries.length; start += IMPORT_BATCH_SIZE) {
+            const batch = entries.slice(start, start + IMPORT_BATCH_SIZE);
+            await call('importEntries', await Promise.all(batch.map(prepareOldEntry)));
+        }
+        await call('importStats', stats);
+    }
+
+    await call('setMeta', 'indexeddb_migrated', '1');
+}
+
+export async function initDB() {
+    ({ storageMode } = await call('open'));
+    await migrateOldDatabase();
+    markReady();
+    console.log(`✅ SQLite database ready (${storageMode})`);
+}
+
+export function getStorageMode() {
+    return storageMode;
+}
+
+export function getEntryById(entryId) {
+    return ready('getEntryById', entryId);
+}
+
+export function getEntryByURL(url) {
+    return ready('getEntryByURL', url);
+}
+
+export function getAllEntries() {
+    return ready('getAllEntries');
+}
+
+export function getRoomEntries() {
+    return ready('getRoomEntries', getTopic());
 }
 
 export async function getEntrySummaries() {
-    const entries = await getRoomEntries();
-    return entries.map((entry) => ({
-        id: entry.entryId,
-        slug: extractSlug(entry.sourceURL)
-    }));
+    const links = await ready('getRoomLinks', getTopic());
+    return links.map(({ id, sourceURL }) => ({ id, slug: extractSlug(sourceURL) }));
 }
 
-export async function getEntryCount() {
-    return (await getRoomEntries()).length;
+export function getEntryCount() {
+    return ready('getEntryCount', getTopic());
 }
 
-export async function savePreview(entryId, preview) {
-    const entry = await getEntryById(entryId);
-    if (!entry?.hasPreview) return false;
-
-    entry.preview = preview;
-    await db.put(STORE_NAME, entry);
-    return true;
-}
-
-export async function reannounceAllEntries() {
-    const { contentDHT } = await import('../network/contentDHT.js');
-    const { extractSlug } = await import('../../shared/urlParser.js');
-    
-    const allEntries = await getAllEntries();
-    
-    allEntries.forEach(entry => {
-        const slug = extractSlug(entry.sourceURL);
-        contentDHT.announceContent(slug);
-    });
-    
-    console.log(`📢 Re-announced ${allEntries.length} existing entries to DHT`);
+export function savePreview(entryId, preview) {
+    return ready('savePreview', entryId, preview);
 }
 
 export async function addEntry(entry) {
-    try {
-        const id = await db.add(STORE_NAME, entry);
-        console.log('✅ Entry added to DB with ID:', id);
-        await updateEntryCount();
-        return id;
-    } catch (error) {
-        console.error('❌ Failed to add entry:', error);
-        throw error;
-    }
+    await ready('addEntry', entry);
+    await updateEntryCount();
 }
 
-export async function searchEntries(query) {
-    const allEntries = await getRoomEntries();
-    return allEntries.filter(e => 
-        e.sourceURL.toLowerCase().includes(query.toLowerCase()) || 
-        e.title?.toLowerCase().includes(query.toLowerCase())
-    );
-}
-
-export async function getEntryByURL(url) {
-    await dbReady;
-    const allEntries = await db.getAll(STORE_NAME);
-    return allEntries.find(e => e.sourceURL === url);
-}
-
-export async function getAllEntries() {
-    await dbReady;
-    return await db.getAll(STORE_NAME);
+export function searchEntries(query) {
+    return ready('searchEntries', getTopic(), query);
 }
 
 export async function updateEntryCount() {
     const count = await getEntryCount();
     const countEl = document.getElementById('entry-count');
     if (countEl) countEl.textContent = count;
-    console.log('📊 Total entries in DB:', count);
 }
 
-// Stats tracking
-export async function trackSearch(contentId) {
-    try {
-        const stats = await db.get(STATS_STORE, contentId);
-        
-        if (stats) {
-            stats.searches++;
-            await db.put(STATS_STORE, stats);
-        } else {
-            await db.add(STATS_STORE, {
-                contentId,
-                searches: 1,
-                downloads: 0
-            });
-        }
-    } catch (error) {
-        console.error('Failed to track search:', error);
-    }
+export function trackSearch(contentId) {
+    return ready('trackStat', contentId, 'searches');
 }
 
-export async function trackDownload(contentId) {
-    try {
-        const stats = await db.get(STATS_STORE, contentId);
-        
-        if (stats) {
-            stats.downloads++;
-            await db.put(STATS_STORE, stats);
-        } else {
-            await db.add(STATS_STORE, {
-                contentId,
-                searches: 0,
-                downloads: 1
-            });
-        }
-    } catch (error) {
-        console.error('Failed to track download:', error);
-    }
+export function trackDownload(contentId) {
+    return ready('trackStat', contentId, 'downloads');
 }
 
-export async function getStats(contentId) {
-    try {
-        const stats = await db.get(STATS_STORE, contentId);
-        return stats || { searches: 0, downloads: 0 };
-    } catch (error) {
-        return { searches: 0, downloads: 0 };
-    }
+export function getStats(contentId) {
+    return ready('getStats', contentId);
 }

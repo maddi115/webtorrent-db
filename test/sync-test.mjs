@@ -63,16 +63,8 @@ async function hasLink(page, url) {
     const deadline = Date.now() + WAIT_MS;
     while (Date.now() < deadline) {
         const entry = await page.evaluate(async (target) => {
-            const db = await new Promise((res, rej) => {
-                const r = indexedDB.open('webtorrent-metadata-db-v2');
-                r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-            });
-            const all = await new Promise((res) => {
-                const r = db.transaction('entries').objectStore('entries').getAll();
-                r.onsuccess = () => res(r.result);
-            });
-            db.close();
-            return all.find((e) => e.sourceURL === target) || null;
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            return getEntryByURL(target);
         }, url);
         if (entry) return entry;
         await new Promise((r) => setTimeout(r, 200));
@@ -82,16 +74,9 @@ async function hasLink(page, url) {
 
 async function countLink(page, url) {
     return page.evaluate(async (target) => {
-        const db = await new Promise((res, rej) => {
-            const r = indexedDB.open('webtorrent-metadata-db-v2');
-            r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-        });
-        const all = await new Promise((res) => {
-            const r = db.transaction('entries').objectStore('entries').getAll();
-            r.onsuccess = () => res(r.result);
-        });
-        db.close();
-        return all.filter((e) => e.sourceURL === target).length;
+        const { getAllEntries } = await import('/src/browser/storage/db.js');
+        const entries = await getAllEntries();
+        return entries.filter((entry) => entry.sourceURL === target).length;
     }, url);
 }
 
@@ -253,12 +238,53 @@ export async function run({ setup } = {}) {
         report('Same topic gets the link', Boolean(await hasLink(h, u9)));
 
         await a.reload();
+        await a.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        report('Links survive a page reload', Boolean(await hasLink(a, u1)));
         await waitForPeers(a, 2);
         await new Promise((r) => setTimeout(r, 3000));
         await a.fill('#search-input', `fake-link-a-${ID}`);
         await new Promise((r) => setTimeout(r, 3000));
         const counts = [await countLink(a, u1), await countLink(c, u1)];
         report('No duplicate links', counts.every((n) => n === 1), `copies: ${counts.join(', ')}`);
+
+        const migrationContext = await browser.newContext();
+        if (setup) await setup(migrationContext);
+        await migrationContext.route('**/seed.html', (route) => route.fulfill({
+            contentType: 'text/html',
+            body: '<!doctype html><title>Seed</title>'
+        }));
+        const seed = await migrationContext.newPage();
+        const oldURL = `https://example.com/t/old-saved-link-${ID}/1`;
+        await seed.goto(`${APP_URL}/seed.html`);
+        await seed.evaluate((sourceURL) => new Promise((resolve, reject) => {
+            const request = indexedDB.open('webtorrent-metadata-db-v2', 5);
+            request.onupgradeneeded = () => {
+                const entries = request.result.createObjectStore('entries', { keyPath: 'id', autoIncrement: true });
+                entries.createIndex('entryId', 'entryId');
+                request.result.createObjectStore('stats', { keyPath: 'contentId' });
+            };
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                const transaction = request.result.transaction('entries', 'readwrite');
+                transaction.objectStore('entries').add({
+                    sourceURL, magnet: 'magnet:?xt=urn:btih:abc', title: 'Old Saved Link', addedBy: 'Old User', timestamp: 123
+                });
+                transaction.oncomplete = () => { request.result.close(); resolve(); };
+            };
+        }), oldURL);
+        await seed.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-migration`);
+        await seed.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        report('Old saved links move to SQLite', Boolean(await hasLink(seed, oldURL)));
+
+        await seed.fill('#search-input', 'saved link');
+        const searched = await seed.waitForSelector('.url-title', { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Search finds words inside titles', searched);
+
+        const secondTab = await migrationContext.newPage();
+        await secondTab.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-migration`);
+        await secondTab.waitForSelector('#storage-warning', { timeout: WAIT_MS });
+        report('A second tab shows a safe warning', true);
+        await migrationContext.close();
     } catch (e) {
         report('Test run finished', false, e.message.split('\n')[0]);
     } finally {

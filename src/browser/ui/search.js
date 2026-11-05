@@ -1,5 +1,5 @@
 // search.js - With online/offline status
-import { searchEntries, getRoomEntries, trackSearch, getStats } from '../storage/db.js';
+import { searchEntries, trackSearch, getStats } from '../storage/db.js';
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
@@ -55,8 +55,8 @@ async function performSearch(query) {
         const slug = extractSlug(query);
         contentId = slug;
         
-        const allEntries = await getRoomEntries();
-        results = allEntries.filter(e => 
+        const matches = await searchEntries(slug);
+        results = matches.filter(e => 
             e.sourceURL && (
                 e.sourceURL.includes(query) || 
                 extractSlug(e.sourceURL).includes(slug)

@@ -5,13 +5,21 @@ import { initAddEntry } from './browser/ui/addEntry.js';
 import { initProfile } from './browser/ui/profile.js';
 import { initRoomPicker } from './browser/ui/roomPicker.js';
 import { initPeerTable } from './browser/ui/peerTable.js';
-import { initDB } from './browser/storage/db.js';
+import { getStorageMode, initDB } from './browser/storage/db.js';
 import { initWASM } from './browser/wasm/wasmLoader.js';
 import { gossipBinary } from './browser/network/gossipBinary.js';
 import { downloadManager } from './browser/downloads/downloadManager.js';
 import { presenceManager } from './browser/network/presence.js';
 import { logger } from './shared/logger.js';
 import { getUsername } from './shared/username.js';
+
+function showStorageWarning() {
+    const warning = document.createElement('p');
+    warning.id = 'storage-warning';
+    warning.className = 'storage-warning';
+    warning.textContent = 'This app is open in another tab, so changes here will not be saved.';
+    document.querySelector('.search-container').prepend(warning);
+}
 
 async function init() {
     logger.info('🚀 Initializing WebTorrent P2P DB...');
@@ -24,6 +32,9 @@ async function init() {
     
     await initDB();
     logger.info('✅ Storage initialized');
+    if (getStorageMode() === 'memory') {
+        showStorageWarning();
+    }
     
     // DHT auto-initializes on import
     logger.info('✅ Network initialized');

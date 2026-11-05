@@ -13,6 +13,7 @@
     "test:sync": "node test/sync-test.mjs"
   },
   "dependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.54.1-build1",
     "idb": "^8.0.1",
     "trystero": "^0.26.0"
   },

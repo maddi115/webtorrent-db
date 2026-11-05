@@ -23,6 +23,9 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    exclude: ['simple-peer']
+    exclude: ['simple-peer', '@sqlite.org/sqlite-wasm']
+  },
+  worker: {
+    format: 'es'
   }
 });
