@@ -193,7 +193,9 @@ function bytesToBase64(bytes) {
 // Sorted URLs and sorted times sit in separate columns, which compress best
 export function packSnapshot(room, entries) {
     const sorted = [...entries].sort((a, b) => (
-        a.sourceURL < b.sourceURL ? -1 : a.sourceURL > b.sourceURL ? 1 : a.timestamp - b.timestamp
+        a.sourceURL < b.sourceURL ? -1
+            : a.sourceURL > b.sourceURL ? 1
+                : a.timestamp - b.timestamp || String(a.entryId).localeCompare(String(b.entryId))
     ));
 
     const flags = new Writer();

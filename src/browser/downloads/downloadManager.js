@@ -62,8 +62,8 @@ class DownloadManager {
         const torrent = this.client.add(magnetURI, {
             announce: [
                 'wss://tracker.openwebtorrent.com',
-                'wss://tracker.btorrent.xyz',
-                'wss://tracker.fastcast.nz'
+                'wss://tracker.webtorrent.dev',
+                'wss://open.ftorrent.com'
             ]
         });
         

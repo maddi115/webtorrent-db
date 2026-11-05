@@ -120,6 +120,18 @@ export function getExistingIds(ids) {
     return ready('getExistingIds', ids);
 }
 
+export function getSnapshotInfo(cutoff, chunkBytes) {
+    return ready('getSnapshotInfo', getTopic(), cutoff, chunkBytes);
+}
+
+export function getSnapshotChunk(room, hash, index) {
+    return ready('getSnapshotChunk', room, hash, index);
+}
+
+export function importSnapshot(room, bytes, hash) {
+    return ready('importSnapshot', room, bytes, hash);
+}
+
 export function importEntries(entries) {
     return ready('importEntries', entries);
 }

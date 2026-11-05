@@ -301,6 +301,65 @@ export async function run({ setup } = {}) {
         await syncA.context.close();
         await syncB.context.close();
 
+        const shareOptions = `testRoom=${TEST_ROOM}-share&snapshotMin=100&snapshotChunk=8192`;
+        const seedOldLinks = async (name) => {
+            const context = await browser.newContext();
+            if (setup) await setup(context);
+            const page = await context.newPage();
+            await page.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-solo-${name}`);
+            await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
+            await page.evaluate(async (time) => {
+                const { importEntries, updateEntryCount } = await import('/src/browser/storage/db.js');
+                const { getEntryId } = await import('/src/shared/entryId.js');
+                const entries = await Promise.all(Array.from({ length: 3000 }, async (_, index) => {
+                    const entry = {
+                        sourceURL: `https://example.com/t/shared-archive-${index}-${(index * 7919).toString(36)}/${index}`,
+                        title: `Archive ${(index * 104729).toString(36)}`, addedBy: 'Archive', timestamp: time + index,
+                        room: 'general', magnet: null, hasPreview: false
+                    };
+                    entry.entryId = await getEntryId(entry);
+                    return entry;
+                }));
+                await importEntries(entries);
+                await updateEntryCount();
+            }, ID - 30 * 24 * 60 * 60 * 1000);
+            await page.goto(`${APP_URL}/?${shareOptions}`);
+            await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
+            return { page, context };
+        };
+        const [shareA, shareB] = await Promise.all([seedOldLinks('ShareA'), seedOldLinks('ShareB')]);
+        await waitForPeers(shareA.page, 1);
+        const shareC = await openPeer(browser, 'ShareC', setup, shareOptions);
+        const readShareStats = () => shareC.evaluate(async () => {
+            const { getEntryCount } = await import('/src/browser/storage/db.js');
+            const { snapshotStats } = await import('/src/browser/network/snapshotManager.js');
+            const { syncStats } = await import('/src/browser/network/smartSync.js');
+            return {
+                links: await getEntryCount(),
+                restored: snapshotStats.restored,
+                chunks: snapshotStats.chunks,
+                peers: snapshotStats.peers.size,
+                syncBytes: syncStats.sentBytes
+            };
+        });
+        let shareStats = await readShareStats();
+        const shareDeadline = Date.now() + WAIT_MS;
+        while (shareStats.links < 3000 && Date.now() < shareDeadline) {
+            await new Promise((r) => setTimeout(r, 200));
+            shareStats = await readShareStats();
+        }
+        report('New user gets a snapshot', shareStats.restored === 3000, JSON.stringify(shareStats));
+        report('Snapshot comes from several peers', shareStats.peers === 2);
+
+        const badSnapshotRejected = await shareC.evaluate(async () => {
+            const { importSnapshot } = await import('/src/browser/storage/db.js');
+            const junk = new TextEncoder().encode('fake snapshot');
+            return importSnapshot('general', junk, '00000000000000000000000000000000').then(() => false, () => true);
+        });
+        report('Fake snapshots are rejected', badSnapshotRejected);
+        await shareA.context.close();
+        await shareB.context.close();
+
         const snapshot = await a.evaluate(async () => {
             const { getEntryId, toPublicEntry } = await import('/src/shared/entryId.js');
             const {

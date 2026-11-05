@@ -1,5 +1,10 @@
 // sqliteWorker.js - Runs SQLite away from the page so big searches stay smooth
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import { getEntryId } from '../../shared/entryId.js';
+import { cleanRemoteEntry } from '../../shared/entryRules.js';
+import {
+    compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
+} from '../../shared/snapshot.js';
 
 const LOCK_NAME = 'webtorrent-sqlite-owner';
 const LOCK_WAIT_MS = 3000;
@@ -14,6 +19,7 @@ const ENTRY_COLUMNS = `
 let db;
 let storageMode = 'opfs';
 const syncIndexes = new Map();
+const snapshots = new Map();
 
 const SCHEMA = `
     CREATE TABLE IF NOT EXISTS entries (
@@ -143,8 +149,16 @@ function getPrefixRange(ids, prefix) {
     return [firstIndexAtOrAfter(ids, prefix), firstIndexAtOrAfter(ids, `${prefix}g`)];
 }
 
+async function hashBytes(bytes, size) {
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(hash).slice(0, size))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
 function insertEntry(entry) {
     syncIndexes.delete(entry.room || 'general');
+    snapshots.delete(entry.room || 'general');
     db.exec({
         sql: `INSERT OR IGNORE INTO entries (
             entry_id, room, source_url, magnet, instant_io_link, title,
@@ -277,6 +291,58 @@ const methods = {
             'SELECT 1 FROM entries WHERE entry_id = ?',
             [id]
         ) === 1);
+    },
+
+    async getSnapshotInfo(room, cutoff, chunkBytes) {
+        const cached = snapshots.get(room);
+        if (cached?.cutoff === cutoff) return cached.info;
+
+        const entries = selectAll(
+            `SELECT ${ENTRY_COLUMNS} FROM entries WHERE room = ? AND timestamp < ?`,
+            [room, cutoff]
+        );
+        const bytes = await compressSnapshot(packSnapshot(room, entries));
+        const chunkHashes = [];
+
+        for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
+            chunkHashes.push(await hashBytes(bytes.subarray(offset, offset + chunkBytes), 8));
+        }
+
+        const info = {
+            hash: await hashBytes(bytes, 16),
+            bytes: bytes.length,
+            count: entries.length,
+            chunkHashes
+        };
+        snapshots.set(room, { cutoff, chunkBytes, bytes, info });
+        return info;
+    },
+
+    getSnapshotChunk(room, hash, index) {
+        const snapshot = snapshots.get(room);
+        if (snapshot?.info.hash !== hash) return null;
+
+        const start = index * snapshot.chunkBytes;
+        return snapshot.bytes.slice(start, start + snapshot.chunkBytes);
+    },
+
+    async importSnapshot(room, bytes, expectedHash) {
+        if (await hashBytes(bytes, 16) !== expectedHash) throw new Error('Snapshot hash mismatch');
+
+        const snapshot = unpackSnapshot(await decompressSnapshot(bytes));
+        if (snapshot.room !== room) throw new Error('Snapshot is for another room');
+
+        const entries = [];
+        for (const rawEntry of snapshot.entries) {
+            const entry = cleanRemoteEntry(rawEntry, room);
+            if (entry) {
+                entry.entryId = await getEntryId(entry);
+                entries.push(entry);
+            }
+        }
+
+        db.transaction(() => entries.forEach(insertEntry));
+        return entries.length;
     },
 
     getThumbsWithoutHash() {

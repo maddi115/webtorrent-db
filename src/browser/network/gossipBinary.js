@@ -4,8 +4,8 @@ import { addEntry, getEntryById } from '../storage/db.js';
 import { contentDHT } from './contentDHT.js';
 import { extractSlug } from '../../shared/urlParser.js';
 import { fromPublicEntry, getEntryId, toPublicEntry } from '../../shared/entryId.js';
-import { safeLink, safeThumbHash, shortText } from '../../shared/safe.js';
-import { getTopic, isTopic } from '../../shared/rooms.js';
+import { cleanRemoteEntry } from '../../shared/entryRules.js';
+import { getTopic } from '../../shared/rooms.js';
 import { logger } from '../../shared/logger.js';
 
 class GossipEngine {
@@ -29,24 +29,9 @@ class GossipEngine {
             return;
         }
 
-        if (typeof rawEntry?.sourceURL !== 'string' || !rawEntry.sourceURL) return;
-        const room = rawEntry.room || 'general';
-        if (!isTopic(room) || room !== getTopic()) return;
-        if (!Number.isFinite(rawEntry.timestamp)) return;
+        const entry = cleanRemoteEntry(rawEntry, getTopic());
+        if (!entry) return;
 
-        const entry = {
-            sourceURL: shortText(rawEntry.sourceURL, 2000),
-            magnet: shortText(rawEntry.magnet, 4000) || null,
-            instantIOLink: safeLink(rawEntry.instantIOLink) === '#' ? null : shortText(rawEntry.instantIOLink, 2000),
-            title: shortText(rawEntry.title, 200),
-            addedBy: shortText(rawEntry.addedBy, 100),
-            timestamp: rawEntry.timestamp,
-            thumb: null,
-            thumbHash: safeThumbHash(rawEntry.thumbHash),
-            hasPreview: rawEntry.hasPreview === true,
-            preview: null,
-            room
-        };
         entry.entryId = await getEntryId(entry);
 
         if (this.receiving.has(entry.entryId)) return;

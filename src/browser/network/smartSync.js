@@ -23,8 +23,8 @@ function isPrefix(value) {
 }
 
 // One side starts, so two peers do not run the same sync twice
-export async function startSync(connection) {
-    if (selfId > connection.peer) return;
+export async function startSync(connection, force = false) {
+    if (!force && selfId > connection.peer) return;
 
     const parts = await getSyncFingerprints(['']);
     sendSync(connection, { type: 'sync_fingerprints', parts });

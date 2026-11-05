@@ -33,7 +33,8 @@ function createConnection(peerId, roomId) {
         open: true,
         joinedAt,
         bridge: roomId !== getPrimaryRoom(),
-        send: (message) => rooms.get(roomId)?.messages.send(message, { target: peerId })
+        send: (message) => rooms.get(roomId)?.messages.send(message, { target: peerId }),
+        sendChunk: (bytes, metadata) => rooms.get(roomId)?.chunks.send(bytes, { target: peerId, metadata })
     };
 }
 
@@ -49,7 +50,8 @@ function openRoom(roomId) {
 
     const room = joinRoom({ appId: APP_ID }, roomId);
     const messages = room.makeAction('message');
-    rooms.set(roomId, { room, messages });
+    const chunks = room.makeAction('chunk');
+    rooms.set(roomId, { room, messages, chunks });
 
     room.onPeerJoin = (peerId) => {
         logger.info(`✅ Connected to peer: ${peerId}`);
@@ -70,6 +72,10 @@ function openRoom(roomId) {
 
     messages.onMessage = (data, { peerId }) => {
         peerManager.handlePeerData(data, getConnection(peerId, roomId));
+    };
+
+    chunks.onMessage = (data, { peerId, metadata }) => {
+        peerManager.handleChunk(data, metadata, peerId);
     };
 
     logger.info(`🔗 Looking for peers in room: ${roomId}`);

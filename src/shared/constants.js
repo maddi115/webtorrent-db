@@ -1,7 +1,8 @@
 // constants.js - Shared constants
 export const DHT_BOOTSTRAP_NODES = [
     'wss://tracker.openwebtorrent.com',
-    'wss://tracker.btorrent.xyz'
+    'wss://tracker.webtorrent.dev',
+    'wss://open.ftorrent.com'
 ];
 
 export const MAX_PEERS = 50;

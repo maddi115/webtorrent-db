@@ -11,6 +11,7 @@ import { MAX_AVATAR_CHARS, MAX_PREVIEW_CHARS, safeImage, shortText } from '../..
 import { renderPeerTable } from '../ui/peerTable.js';
 import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
 import { handleFingerprints, handleLists, startSync } from './smartSync.js';
+import { handleChunk, handleChunkRequest, handleLinkGap, handleOffer } from './snapshotManager.js';
 
 const MAX_SYNC_ITEMS = 5000;
 const MAX_WHO_HAS = 50;
@@ -54,7 +55,7 @@ class PeerManager {
         });
     }
 
-    addPeer(connection) {
+    async addPeer(connection) {
         const peerId = connection.peer;
         this.peers.set(peerId, connection);
         this.peerIds.add(peerId);
@@ -68,15 +69,17 @@ class PeerManager {
             bridge: false
         });
 
+        this.statusChanged();
+
+        const { getEntryCount } = await import('../storage/db.js');
         connection.send({
             type: 'handshake',
             username: getUsername(),
             avatar: getAvatar(),
             joinedAt: connection.joinedAt,
-            bridge: connection.bridge
+            bridge: connection.bridge,
+            links: await getEntryCount()
         });
-        startSync(connection);
-        this.statusChanged();
     }
 
     removePeer(peerId) {
@@ -127,6 +130,14 @@ class PeerManager {
 
             case 'sync_lists':
                 handleLists(data, connection, (ids, peer) => this.requestMissing(ids, peer));
+                break;
+
+            case 'snapshot_offer':
+                handleOffer(data, connection, (peer) => startSync(peer, true));
+                break;
+
+            case 'snapshot_get':
+                handleChunkRequest(data, connection);
                 break;
 
             case 'who_has':
@@ -186,6 +197,25 @@ class PeerManager {
         profile.bridge = data.bridge === true;
         this.handleProfile(data, connection);
         this.onMembersChanged();
+        this.chooseSync(data, connection);
+    }
+
+    // Big gaps use a snapshot first. Small gaps go straight to smart sync.
+    async chooseSync(data, connection) {
+        const { getEntryCount } = await import('../storage/db.js');
+        const theirLinks = Number.isSafeInteger(data.links) ? data.links : 0;
+        const waiting = await handleLinkGap(
+            connection,
+            await getEntryCount(),
+            theirLinks,
+            (peer) => startSync(peer, true)
+        );
+
+        if (!waiting) startSync(connection);
+    }
+
+    handleChunk(data, metadata, peerId) {
+        handleChunk(data, metadata, peerId);
     }
 
     handleProfile(data, connection) {
