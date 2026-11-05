@@ -178,6 +178,45 @@ export async function run({ setup } = {}) {
             return rows === 3 && online === '3' && direct === '3';
         }, null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
         report('Peer table shows live counts', tableShown);
+
+        await c.evaluate(async () => {
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            const { renderPeerTable } = await import('/src/browser/ui/peerTable.js');
+            for (let i = 0; i < 20; i++) {
+                peerManager.profiles.set(`fake-peer-${i}`, {
+                    username: `Fake User ${i}`, avatar: null, connections: 1, links: 0, connectedAt: Date.now()
+                });
+            }
+            await renderPeerTable();
+        });
+        report('Bar shows 4 profiles and the total', await c.evaluate(() =>
+            document.querySelectorAll('#peer-bar-avatars .peer-avatar').length === 4
+            && document.getElementById('peer-bar-count').textContent.endsWith(' online')));
+        report('Table stays closed until clicked', await c.isHidden('#peer-modal'));
+
+        await c.click('#peer-bar');
+        const size = await c.evaluate(() => {
+            const box = document.querySelector('.peer-panel').getBoundingClientRect();
+            const scroll = document.querySelector('.peer-panel-scroll');
+            return {
+                width: box.width,
+                height: box.height,
+                centered: Math.abs(box.left + box.width / 2 - innerWidth / 2) <= 1,
+                rows: document.querySelectorAll('#peer-table-body tr').length,
+                fits: scroll.scrollHeight <= scroll.clientHeight
+            };
+        });
+        report('Table is 600 by 400 and centered',
+            size.width === 600 && size.height === 400 && size.centered, JSON.stringify(size));
+        report('Table shows 13 users without scrolling', size.rows === 13 && size.fits);
+
+        await c.click('#peer-next');
+        const pageTwo = await c.waitForFunction(() =>
+            document.getElementById('peer-page-info').textContent.startsWith('Page 2')
+            && document.querySelectorAll('#peer-table-body tr').length === 10,
+            null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Pagination shows the next users', pageTwo);
+        await c.click('#peer-close');
         report('Late joiner receives existing links', !!(await hasLink(c, u1)));
 
         await a.reload();

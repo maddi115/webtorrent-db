@@ -58,27 +58,40 @@
         </footer>
     </div>
 
-    <section class="peer-panel" aria-label="Connected peers">
-        <div class="peer-panel-summary">
-            <span>Online: <span id="peer-online-count">1</span></span>
-            <span>Direct connections: <span id="peer-direct-count">0</span></span>
-        </div>
-        <div class="peer-panel-scroll">
-            <table class="peer-table">
-                <thead>
-                    <tr>
-                        <th>Photo</th>
-                        <th>User</th>
-                        <th>Peer ID</th>
-                        <th>Connections</th>
-                        <th>Links</th>
-                        <th>Time</th>
-                    </tr>
-                </thead>
-                <tbody id="peer-table-body"></tbody>
-            </table>
-        </div>
-    </section>
+    <button id="peer-bar" class="peer-bar" type="button" aria-haspopup="dialog" aria-controls="peer-modal" aria-expanded="false">
+        <span id="peer-bar-avatars" class="peer-bar-avatars"></span>
+        <span id="peer-bar-count">1 online</span>
+    </button>
+
+    <div id="peer-modal" class="peer-modal" hidden>
+        <section class="peer-panel" role="dialog" aria-modal="true" aria-label="Connected peers">
+            <div class="peer-panel-summary">
+                <span>Online: <span id="peer-online-count">1</span></span>
+                <span>Direct connections: <span id="peer-direct-count">0</span></span>
+                <button id="peer-close" class="peer-close" type="button" aria-label="Close peers table">&times;</button>
+            </div>
+            <div class="peer-panel-scroll">
+                <table class="peer-table">
+                    <thead>
+                        <tr>
+                            <th>Photo</th>
+                            <th>User</th>
+                            <th>Peer ID</th>
+                            <th>Connections</th>
+                            <th>Links</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="peer-table-body"></tbody>
+                </table>
+            </div>
+            <div id="peer-pagination" class="peer-pagination" hidden>
+                <button id="peer-prev" type="button">Prev</button>
+                <span id="peer-page-info">Page 1 of 1</span>
+                <button id="peer-next" type="button">Next</button>
+            </div>
+        </section>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
 </body>

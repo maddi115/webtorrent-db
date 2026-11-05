@@ -1,6 +1,10 @@
-// peerTable.js - Live black table of the people connected right now
+// peerTable.js - Small online bar that opens a live table of connected peers
 import { getUsername } from '../../shared/username.js';
 import { getAvatar } from '../../shared/profile.js';
+
+const ROWS_PER_PAGE = 13;
+const BAR_PROFILES = 4;
+let currentPage = 1;
 
 function makeAvatar(avatar, username) {
     if (avatar) {
@@ -42,6 +46,26 @@ function addRow(body, { avatar, username, peerId, connections, links, time, isSe
     body.append(row);
 }
 
+function renderBar(people) {
+    const avatars = document.createDocumentFragment();
+    people.slice(0, BAR_PROFILES).forEach((person) => {
+        avatars.append(makeAvatar(person.avatar, person.username));
+    });
+
+    document.getElementById('peer-bar-avatars').replaceChildren(avatars);
+    document.getElementById('peer-bar-count').textContent = `${people.length} online`;
+}
+
+function renderPagination(totalRows) {
+    const totalPages = Math.max(1, Math.ceil(totalRows / ROWS_PER_PAGE));
+    currentPage = Math.min(currentPage, totalPages);
+
+    document.getElementById('peer-pagination').hidden = totalPages === 1;
+    document.getElementById('peer-page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+    document.getElementById('peer-prev').disabled = currentPage === 1;
+    document.getElementById('peer-next').disabled = currentPage === totalPages;
+}
+
 export async function renderPeerTable() {
     const body = document.getElementById('peer-table-body');
     if (!body) return;
@@ -54,33 +78,70 @@ export async function renderPeerTable() {
 
     const mine = peerManager.peers.size;
     const theirs = profiles.reduce((total, [, profile]) => total + profile.connections, 0);
-    document.getElementById('peer-online-count').textContent = mine + 1;
+    document.getElementById('peer-online-count').textContent = profiles.length + 1;
     document.getElementById('peer-direct-count').textContent = Math.round((mine + theirs) / 2);
 
+    const people = [
+        {
+            avatar: getAvatar(),
+            username: getUsername(),
+            peerId: getMyPeerId().slice(0, 8),
+            connections: mine,
+            links,
+            time: 'Now',
+            isSelf: true
+        },
+        ...profiles.map(([peerId, profile]) => ({
+            avatar: profile.avatar,
+            username: profile.username,
+            peerId: peerId.slice(0, 8),
+            connections: profile.connections,
+            links: profile.links,
+            time: formatConnectedTime(profile.connectedAt)
+        }))
+    ];
+
+    renderBar(people);
+    renderPagination(people.length);
+
+    const start = (currentPage - 1) * ROWS_PER_PAGE;
     const rows = document.createDocumentFragment();
-    addRow(rows, {
-        avatar: getAvatar(),
-        username: getUsername(),
-        peerId: getMyPeerId().slice(0, 8),
-        connections: mine,
-        links,
-        time: 'Now',
-        isSelf: true
-    });
-
-    profiles.forEach(([peerId, profile]) => addRow(rows, {
-        avatar: profile.avatar,
-        username: profile.username,
-        peerId: peerId.slice(0, 8),
-        connections: profile.connections,
-        links: profile.links,
-        time: formatConnectedTime(profile.connectedAt)
-    }));
-
+    people.slice(start, start + ROWS_PER_PAGE).forEach((person) => addRow(rows, person));
     body.replaceChildren(rows);
 }
 
+function setTableOpen(isOpen) {
+    const bar = document.getElementById('peer-bar');
+    document.getElementById('peer-modal').hidden = !isOpen;
+    bar.setAttribute('aria-expanded', String(isOpen));
+    if (isOpen) {
+        document.getElementById('peer-close').focus();
+    } else {
+        bar.focus();
+    }
+}
+
+function changePage(change) {
+    currentPage += change;
+    renderPeerTable();
+}
+
 export function initPeerTable() {
+    const modal = document.getElementById('peer-modal');
+
+    document.getElementById('peer-bar').addEventListener('click', () => setTableOpen(true));
+    document.getElementById('peer-close').addEventListener('click', () => setTableOpen(false));
+    document.getElementById('peer-prev').addEventListener('click', () => changePage(-1));
+    document.getElementById('peer-next').addEventListener('click', () => changePage(1));
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) setTableOpen(false);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !modal.hidden) setTableOpen(false);
+    });
+
     renderPeerTable();
     setInterval(renderPeerTable, 5000);
 }
