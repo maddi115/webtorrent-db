@@ -39,15 +39,3 @@ function generateDiscriminator() {
 function getRandomEmoji() {
     return EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
 }
-
-export function parseUsername(fullUsername) {
-    const match = fullUsername.match(/^(.+?)#(\d{4})(.+)$/);
-    if (match) {
-        return {
-            name: match[1],
-            discriminator: match[2],
-            emoji: match[3]
-        };
-    }
-    return { name: fullUsername, discriminator: '', emoji: '' };
-}

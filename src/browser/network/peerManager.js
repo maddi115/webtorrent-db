@@ -1,7 +1,7 @@
 // peerManager.js - Track connected peers and handle their messages
 import { logger } from '../../shared/logger.js';
-import { gossipBinary } from './gossipBinary.js';
-import { contentDHT } from './contentDHT.js';
+import { gossip } from './gossip.js';
+import { linkPeers } from './linkPeers.js';
 import { presenceManager } from './presence.js';
 import { getUsername } from '../../shared/username.js';
 import { getAvatar } from '../../shared/profile.js';
@@ -88,7 +88,7 @@ class PeerManager {
             presenceManager.setOffline(username);
         }
 
-        contentDHT.removePeer(peerId);
+        linkPeers.removePeer(peerId);
         this.peers.delete(peerId);
         this.peerIds.delete(peerId);
         this.profiles.delete(peerId);
@@ -154,7 +154,7 @@ class PeerManager {
 
             case 'announce':
                 if (typeof data.contentId === 'string' && data.contentId) {
-                    contentDHT.addPeer(data.contentId, connection.peer);
+                    linkPeers.addPeer(data.contentId, connection.peer);
 
                     const username = presenceManager.getUserByPeerId(connection.peer);
                     if (username) {
@@ -168,7 +168,7 @@ class PeerManager {
                 break;
 
             case 'entry':
-                gossipBinary.receiveEntry(data.entry, connection.peer);
+                gossip.receiveEntry(data.entry, connection.peer);
                 break;
 
             case 'request_thumb':

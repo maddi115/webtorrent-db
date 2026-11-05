@@ -1,7 +1,7 @@
 // addEntry.js - Either, both, or at least one
 import { addEntry } from '../storage/db.js';
-import { gossipBinary } from '../network/gossipBinary.js';
-import { contentDHT } from '../network/contentDHT.js';
+import { gossip } from '../network/gossip.js';
+import { linkPeers } from '../network/linkPeers.js';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
 import { getTopic } from '../../shared/rooms.js';
@@ -68,8 +68,8 @@ export function initAddEntry() {
         await addEntry(entry);
         
         const slug = extractSlug(sourceURL);
-        contentDHT.announceContent(slug);
-        gossipBinary.propagateEntry(entry);
+        linkPeers.announceContent(slug);
+        gossip.propagateEntry(entry);
         
         showToast(`✅ Added: ${title}`);
         

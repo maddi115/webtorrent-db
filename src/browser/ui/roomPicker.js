@@ -1,6 +1,6 @@
 // roomPicker.js - Choose which topic room to join
 import { getTopic, TOPICS } from '../../shared/rooms.js';
-import { switchTopic } from '../network/dht.js';
+import { switchTopic } from '../network/roomNetwork.js';
 import { updateEntryCount } from '../storage/db.js';
 import { refreshResults } from './search.js';
 

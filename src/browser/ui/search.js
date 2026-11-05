@@ -1,6 +1,6 @@
 // search.js - Search links and show them in a compact black table
 import { getAvatars, searchEntries, trackDownload, trackSearch, getStats } from '../storage/db.js';
-import { contentDHT } from '../network/contentDHT.js';
+import { linkPeers } from '../network/linkPeers.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
 import { extractSlug, isURL } from '../../shared/urlParser.js';
@@ -87,8 +87,8 @@ window.addEventListener('peer-has-ids', ({ detail }) => {
     let changed = false;
     detail.ids.forEach((id) => {
         const slug = resultSlugs.get(id);
-        if (slug && !contentDHT.findPeers(slug).includes(detail.peerId)) {
-            contentDHT.addPeer(slug, detail.peerId);
+        if (slug && !linkPeers.findPeers(slug).includes(detail.peerId)) {
+            linkPeers.addPeer(slug, detail.peerId);
             changed = true;
         }
     });
@@ -143,7 +143,7 @@ function renderAvatar(username, avatars) {
 async function renderRow(entry, avatars) {
     const slug = extractSlug(entry.sourceURL);
     const stats = await getStats(slug);
-    const peers = contentDHT.findPeers(slug).length;
+    const peers = linkPeers.findPeers(slug).length;
     const username = entry.addedBy || 'Anonymous';
     const online = presenceManager.isOnline(username);
 

@@ -73,14 +73,6 @@ function slugToTitle(slug) {
         .join(' ');
 }
 
-export function normalizeSearchQuery(query) {
-    return query
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/\s+/g, '-');
-}
-
 export function isURL(str) {
     try {
         new URL(str);
@@ -88,9 +80,4 @@ export function isURL(str) {
     } catch {
         return false;
     }
-}
-
-export function generateContentId(entry) {
-    const slug = extractSlug(entry.sourceURL);
-    return `${slug}_${entry.timestamp}`;
 }

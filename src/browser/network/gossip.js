@@ -1,74 +1,58 @@
-// gossip.js - Check local DB, not just memory
+// gossip.js - Share links between peers as JSON
 import { peerManager } from './peerManager.js';
-import { addEntry, getEntryByURL } from '../storage/db.js';
-import { contentDHT } from './contentDHT.js';
+import { addEntry, getEntryById } from '../storage/db.js';
+import { linkPeers } from './linkPeers.js';
 import { extractSlug } from '../../shared/urlParser.js';
+import { fromPublicEntry, getEntryId, toPublicEntry } from '../../shared/entryId.js';
+import { cleanRemoteEntry } from '../../shared/entryRules.js';
+import { getTopic } from '../../shared/rooms.js';
 import { logger } from '../../shared/logger.js';
 
 class GossipEngine {
     constructor() {
-        this.knownEntries = new Set();
+        this.receiving = new Set();
     }
-    
+
+    async init() {
+        logger.info('✅ Gossip initialized (JSON)');
+    }
+
     propagateEntry(entry) {
-        const entryId = this.getEntryId(entry);
-        
-        if (this.knownEntries.has(entryId)) {
-            logger.warn('Entry already propagated:', entryId);
-            return;
-        }
-        
-        this.knownEntries.add(entryId);
-        
-        logger.info('📤 Propagating entry to peers:', entry.sourceURL);
-        
-        peerManager.broadcast({
-            type: 'entry',
-            entry
-        });
+        peerManager.broadcast({ type: 'entry', entry: toPublicEntry(entry) });
     }
-    
-    async receiveEntry(entry) {
-        const entryId = this.getEntryId(entry);
-        
-        logger.info('🔍 Checking received entry:', entryId);
-        
-        // Check if entry exists in LOCAL DB (not just memory)
-        const existingEntry = await getEntryByURL(entry.sourceURL);
-        
-        if (existingEntry) {
-            logger.warn('⚠️  Entry already in local DB, skipping');
-            this.knownEntries.add(entryId); // Mark as known
+
+    async receiveEntry(packedEntry, sourcePeerId) {
+        let rawEntry;
+        try {
+            rawEntry = fromPublicEntry(packedEntry);
+        } catch {
             return;
         }
-        
-        this.knownEntries.add(entryId);
-        
-        logger.info('📥 Received NEW entry from peer:', entry.sourceURL);
-        
+
+        const entry = cleanRemoteEntry(rawEntry, getTopic());
+        if (!entry) return;
+
+        entry.entryId = await getEntryId(entry);
+
+        if (this.receiving.has(entry.entryId)) return;
+        this.receiving.add(entry.entryId);
+
         try {
+            if (await getEntryById(entry.entryId)) return;
+
             await addEntry(entry);
             logger.info('✅ Entry saved to local DB');
-            
-            // Announce to DHT
-            const slug = extractSlug(entry.sourceURL);
-            contentDHT.announceContent(slug);
-            
-            // Trigger auto-refresh
-            import('../ui/search.js').then(({ refreshResults }) => {
-                refreshResults();
-            });
-            
-            // Show toast
+            linkPeers.announceContent(extractSlug(entry.sourceURL));
+            peerManager.forwardEntry(toPublicEntry(entry), sourcePeerId);
+
+            const { refreshResults } = await import('../ui/search.js');
+            refreshResults();
             showToast(`📥 New: ${entry.title || 'Untitled'}`);
-            
         } catch (error) {
             logger.error('Failed to save received entry:', error);
+        } finally {
+            this.receiving.delete(entry.entryId);
         }
-    }
-    
-    getEntryId(entry) {
-        return `${entry.sourceURL}_${entry.timestamp}`;
     }
 }
 
@@ -77,7 +61,7 @@ function showToast(message) {
     toast.className = 'toast';
     toast.textContent = message;
     document.body.appendChild(toast);
-    
+
     setTimeout(() => toast.classList.add('show'), 100);
     setTimeout(() => {
         toast.classList.remove('show');

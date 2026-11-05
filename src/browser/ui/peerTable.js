@@ -72,7 +72,7 @@ export async function renderPeerTable() {
 
     const { peerManager } = await import('../network/peerManager.js');
     const { getEntryCount } = await import('../storage/db.js');
-    const { getMyPeerId, getRoomLabel } = await import('../network/dht.js');
+    const { getMyPeerId, getRoomLabel } = await import('../network/roomNetwork.js');
     const profiles = [...peerManager.profiles.entries()];
     const links = await getEntryCount().catch(() => 0);
 

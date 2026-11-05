@@ -2,135 +2,96 @@
 
 A shared link database that runs in the browser, with no central database.
 
-People post a link with a magnet link or instant.io link and an optional preview image.
-Each browser saves its own copy and shares it directly with other browsers.
+People post links with a title, a magnet or instant.io link, and an optional image.
+Each browser keeps its own copy and shares links directly with other browsers.
 
 ## What it does
 
-- Add links with a magnet link, an instant.io link, or both
-- Sync links between browsers using direct WebRTC connections
-- Save links in each browser with IndexedDB
-- Catch up new browsers on links added before they joined
-- Search links and group results by URL
-- Show which users are online
-- Includes in-browser WebTorrent downloads and streaming
+- Topic rooms that split automatically when they fill up
+- Direct browser-to-browser sharing over WebRTC
+- Local storage and full-text search with WASM SQLite
+- Smart sync that sends only the links another peer is missing
+- Compressed room snapshots, shared in verified chunks from several peers
+- Tiny ThumbHash previews, with images loaded only when needed
+- Profile pictures and custom usernames of up to 5 letters
+- A live table showing who is online
+- Sharing stats and a seeding switch
+- An optional helper that keeps rooms online from your PC
+- In-browser WebTorrent downloads
 
 ## How it works
 
-1. A browser opens the site and connects to the signaling server.
-2. The server sends it the list of other online peers.
-3. PeerJS helps the browsers connect directly over WebRTC.
-4. When someone adds a link, it is saved locally and sent to connected peers.
-5. Peers save the link and announce that they have it.
-6. A browser that joins later asks for any links it is missing.
+1. A browser opens the site and picks a room.
+2. Trystero uses public Nostr relays to introduce people in that room.
+3. WebRTC connects the browsers directly.
+4. New users with a big gap download a snapshot from peers.
+5. Smart sync compares fingerprints and swaps whatever is still missing.
+6. New links go straight to connected peers.
+7. Bridge peers pass links between split rooms.
 
-The server only helps browsers find each other. Links and files do not go through it.
+Relays only make introductions. Links and images travel directly between browsers.
 
 ```
-Browser A            Signaling Server            Browser B
-    |------ find peers ----|---- find peers ------|
-    |                                             |
-    |=========== direct WebRTC connection ========|
+Browser A  --- introductions ---  Nostr relays  --- introductions ---  Browser B
+    |                                                                      |
+    |================== direct encrypted WebRTC connection =================|
 ```
 
-## Quick start
+## Run it
 
-You need Node.js and two terminals.
-
-First time only:
+You need Node.js.
 
 ```bash
 npm install
-cd node
-npm install
-cd ..
-```
-
-Terminal 1:
-
-```bash
-cd node
-npm start
-```
-
-Terminal 2:
-
-```bash
 npm run dev
 ```
 
-Open http://localhost:3000 in two different browsers.
-Add a link in one, and it should appear in the other.
+Open http://localhost:3000 in two browsers and pick the same room.
 
-## Automated test
+## Keep rooms online
 
-The test opens hidden browsers with no saved data, adds fake links, and checks that they sync.
+The helper runs the app in a hidden browser, so links stay available when nobody else is online.
+It also serves the app, so you only need one terminal.
+
+```bash
+npm run helper -- books
+```
+
+Open http://localhost:4173/?room=books
+
+Rooms: `general`, `movies`, `music`, `software`, `games`, and `books`.
+
+## Test it
 
 ```bash
 npx playwright install chromium
 npm run test:sync
 ```
 
-It checks 8 things:
-
-- Browsers connect
-- Links sync in both directions
-- Synced links appear in search
-- instant.io-only links work
-- instant.io links are kept
-- Late joiners catch up
-- Links are not duplicated
-
-## Tech stack
-
-- Vite: build tool and dev server
-- PeerJS and WebRTC: direct browser connections
-- WebSocket: peer discovery through the signaling server
-- IndexedDB: local storage
-- C++ and WebAssembly: CRDT and hashing modules
-- WebTorrent: in-browser downloads and streaming
-- Playwright: automated testing
-
 ## Project layout
 
 ```
-index.html      Main page
-node/           Signaling server
-src/browser/    Network, storage, UI, and downloads
-src/shared/     Shared helpers
-src/wasm/       C++ source for the WebAssembly modules
-src/wasm-dist/  Built WebAssembly files
-test/           Automated sync test
-archive/        Older code
+index.html                  Main page
+src/main.js                 App startup
+src/browser/network/        Rooms, peers, sync, and snapshots
+src/browser/storage/        SQLite database and worker
+src/browser/ui/             Search, tables, and forms
+src/browser/downloads/      WebTorrent downloads
+src/shared/                 Shared helpers and data formats
+test/sync-test.mjs          Automated browser tests
+tools/helper.mjs            Always-on helper
 ```
 
-## Current status
+## Limits
 
-Sync works between two or more browsers on one PC.
-It has not been tested across two PCs yet.
-
-## Known issues
-
-- The signaling server address is set to localhost, so other PCs cannot connect yet
-- Peer discovery depends on the signaling server and the public PeerJS service
-- There is no TURN server, so some networks may block direct connections
-- Duplicate handshakes happen when two peers connect to each other at once
-- Searching sends a query to peers on every search update
-- Large preview images can freeze the page while they sync
-- Binary sync is turned off because it corrupted links, so links are sent as JSON
-- There is no moderation system yet
+- It has only been tested on one PC, using real public relays
+- Real torrent downloads are not covered by the automated test
+- A link is only available while someone who has it is online
 - Peers can see each other's IP addresses
-- Links only spread while a browser that has them is open
-
-## Next steps
-
-- [ ] Find peers through public WebTorrent trackers
-- [ ] Put the site online
-- [ ] Test across two PCs
-- [ ] Add TURN support
-- [ ] Fix duplicate handshakes and query spam
-- [ ] Shrink preview images
-- [ ] Add moderation tools
+- Some strict networks need a TURN server, which is not set up yet
+- Usernames and posts are not signed, so they can be faked
+- There is no moderation yet
+- Only one tab per browser can save to the database
 
 ## Responsible use
 

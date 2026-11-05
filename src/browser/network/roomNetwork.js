@@ -1,4 +1,4 @@
-// dht.js - Find peers through public Nostr relays with Trystero.
+// roomNetwork.js - Find peers through public Nostr relays with Trystero.
 // Relays only make introductions. Browsers do the sharing work directly.
 import { joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';

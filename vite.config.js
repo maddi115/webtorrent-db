@@ -1,29 +1,11 @@
 import { defineConfig } from 'vite';
-import wasm from 'vite-plugin-wasm';
-import topLevelAwait from 'vite-plugin-top-level-await';
-import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
-  plugins: [
-    wasm(),
-    topLevelAwait(),
-    nodePolyfills({
-      include: ['events', 'util', 'buffer', 'process', 'stream'],
-      globals: {
-        Buffer: true,
-        global: true,
-        process: true,
-      }
-    })
-  ],
   server: {
-    port: 3000,
-    fs: {
-      strict: false
-    }
+    port: 3000
   },
   optimizeDeps: {
-    exclude: ['simple-peer', '@sqlite.org/sqlite-wasm']
+    exclude: ['@sqlite.org/sqlite-wasm']
   },
   worker: {
     format: 'es'

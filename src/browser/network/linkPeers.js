@@ -1,4 +1,4 @@
-// contentDHT.js - Track which peers have which content
+// linkPeers.js - Track which peers have which content
 import { logger } from '../../shared/logger.js';
 import { peerManager } from './peerManager.js';
 
@@ -40,4 +40,4 @@ class ContentDHT {
     }
 }
 
-export const contentDHT = new ContentDHT();
+export const linkPeers = new ContentDHT();

@@ -1,5 +1,5 @@
-// main.js - Use correct initDB export
-import './browser/network/dht.js';
+// main.js - Start the app
+import './browser/network/roomNetwork.js';
 import { initUI } from './browser/ui/search.js';
 import { initAddEntry } from './browser/ui/addEntry.js';
 import { initProfile } from './browser/ui/profile.js';
@@ -9,8 +9,7 @@ import { initSeedingMode } from './browser/ui/seedingMode.js';
 import { renderShareStats } from './shared/shareStats.js';
 import { initPeerTable } from './browser/ui/peerTable.js';
 import { getStorageMode, initDB } from './browser/storage/db.js';
-import { initWASM } from './browser/wasm/wasmLoader.js';
-import { gossipBinary } from './browser/network/gossipBinary.js';
+import { gossip } from './browser/network/gossip.js';
 import { downloadManager } from './browser/downloads/downloadManager.js';
 import { presenceManager } from './browser/network/presence.js';
 import { logger } from './shared/logger.js';
@@ -27,10 +26,7 @@ function showStorageWarning() {
 async function init() {
     logger.info('🚀 Initializing WebTorrent P2P DB...');
     
-    logger.info('🔧 Initializing WASM modules...');
-    await initWASM();
-    
-    await gossipBinary.init();
+    await gossip.init();
     // Link sharing still works if the download library cannot load
     await downloadManager.init().catch((error) => {
         logger.warn('⚠️ Downloads are unavailable', error);
