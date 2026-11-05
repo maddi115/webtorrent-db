@@ -78,9 +78,10 @@ async function main() {
         for (const { room, page } of helpers) {
             const status = await page.evaluate(() => ({
                 links: document.getElementById('entry-count').textContent,
-                peers: document.getElementById('peer-count').textContent
+                peers: document.getElementById('peer-count').textContent,
+                relays: document.getElementById('peer-relay-count').textContent
             }));
-            console.log(`${room}: ${status.links} links, ${status.peers} peers connected`);
+            console.log(`${room}: ${status.links} links, ${status.peers} peers, ${status.relays} relays`);
         }
     };
 

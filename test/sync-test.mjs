@@ -372,6 +372,29 @@ export async function run({ setup } = {}) {
         report('Seeding mode switches on', await a.getAttribute('#seed-toggle', 'aria-pressed') === 'true');
         await a.click('#seed-toggle');
 
+        const magnetFixPage = await openPeer(browser, 'MagnetFix', setup, `testRoom=${TEST_ROOM}-magnet`);
+        const instantInMagnet = `https://example.com/t/instant-in-magnet-${ID}/1`;
+        await addLink(magnetFixPage, instantInMagnet, { magnet: `https://instant.io/#${hash}` });
+        const fixedEntry = await hasLink(magnetFixPage, instantInMagnet);
+        report('instant.io links in the magnet box are fixed',
+            fixedEntry?.magnet === `magnet:?xt=urn:btih:${hash}` && fixedEntry?.instantIOLink === `https://instant.io/#${hash}`);
+        await magnetFixPage.close();
+
+        const rejoinOptions = `testRoom=${TEST_ROOM}-rejoin&rejoinMs=1000`;
+        const aloneA = await openPeer(browser, 'AloneA', setup, rejoinOptions);
+        await new Promise((r) => setTimeout(r, 3500));
+        const attempts = await aloneA.evaluate(async () => {
+            const { rejoinStats } = await import('/src/browser/network/roomNetwork.js');
+            return rejoinStats.attempts;
+        });
+        report('Empty rooms rejoin automatically', attempts >= 2, `${attempts} rejoins`);
+        const aloneB = await openPeer(browser, 'AloneB', setup, rejoinOptions);
+        const rejoined = await Promise.all([waitForPeers(aloneA, 1), waitForPeers(aloneB, 1)])
+            .then(() => true).catch(() => false);
+        report('Peers connect after rejoining', rejoined);
+        await aloneA.close();
+        await aloneB.close();
+
         const roomPage = await openPeer(browser, 'RoomLink', setup, `testRoom=${TEST_ROOM}-link&room=music`);
         report('Room links open the right topic', await roomPage.inputValue('#room-select') === 'music');
         await roomPage.close();

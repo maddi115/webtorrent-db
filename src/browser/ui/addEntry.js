@@ -7,7 +7,7 @@ import { getUsername } from '../../shared/username.js';
 import { getTopic } from '../../shared/rooms.js';
 import { getEntryId } from '../../shared/entryId.js';
 import { makeThumbHash, resizeImage } from '../../shared/images.js';
-import { cleanURL, normalizeMagnet } from '../../shared/links.js';
+import { cleanURL, getDownloadMagnet, normalizeMagnet } from '../../shared/links.js';
 
 export function initAddEntry() {
     const addEntryBtn = document.getElementById('add-entry-btn');
@@ -32,8 +32,20 @@ export function initAddEntry() {
     addBtn.addEventListener('click', async () => {
         const customTitle = document.getElementById('entry-title').value.trim();
         const sourceURL = cleanURL(document.getElementById('source-url').value.trim());
-        const magnetLink = normalizeMagnet(document.getElementById('magnet-link').value.trim());
-        const instantIOLink = document.getElementById('instantio-link').value.trim();
+        const magnetInput = document.getElementById('magnet-link').value.trim();
+        let instantIOLink = document.getElementById('instantio-link').value.trim();
+        if (!instantIOLink && magnetInput.startsWith('https://instant.io/')) {
+            instantIOLink = magnetInput;
+        }
+        const magnetLink = normalizeMagnet(
+            getDownloadMagnet(magnetInput) || getDownloadMagnet(instantIOLink) || ''
+        );
+
+        if (magnetInput && !magnetLink && !instantIOLink) {
+            showToast('Magnet links must start with magnet:?');
+            return;
+        }
+
         const previewFile = document.getElementById('preview-upload').files[0];
         
         if (!sourceURL) {

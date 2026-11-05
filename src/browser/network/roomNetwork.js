@@ -1,6 +1,6 @@
 // roomNetwork.js - Find peers through public Nostr relays with Trystero.
 // Relays only make introductions. Browsers do the sharing work directly.
-import { joinRoom, selfId } from 'trystero';
+import { getRelaySockets, joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';
 import { getTopic, setTopic } from '../../shared/rooms.js';
 import { recordShared } from '../../shared/shareStats.js';
@@ -8,10 +8,12 @@ import { logger } from '../../shared/logger.js';
 
 const APP_ID = 'maddi115-webtorrent-p2p-db';
 const DEFAULT_ROOM_CAPACITY = 12;
+const DEFAULT_REJOIN_MS = 90000;
 
 const testOptions = new URLSearchParams(import.meta.env.DEV ? location.search : '');
 const roomPrefix = testOptions.get('testRoom') ? `${testOptions.get('testRoom')}-` : 'v1-';
 const roomCapacity = Number(testOptions.get('capacity')) || DEFAULT_ROOM_CAPACITY;
+const rejoinMs = Number(testOptions.get('rejoinMs')) || DEFAULT_REJOIN_MS;
 
 const joinedAt = Date.now();
 const rooms = new Map();
@@ -153,6 +155,23 @@ export function switchTopic(topic) {
 export function getRoomLabel() {
     return `${getTopic()}${shard > 1 ? ` ${shard}` : ''}${bridgeRoom ? ' + bridge' : ''}`;
 }
+
+export function getRelayCount() {
+    return Object.values(getRelaySockets()).filter((socket) => socket.readyState === 1).length;
+}
+
+export const rejoinStats = { attempts: 0 };
+
+// Relay connections can quietly fail, so an empty room joins again
+function rejoinIfAlone() {
+    if (peerManager.peers.size > 0) return;
+
+    rejoinStats.attempts += 1;
+    closeAllRooms();
+    openRoom(getPrimaryRoom());
+}
+
+setInterval(rejoinIfAlone, rejoinMs);
 
 export function getMyPeerId() {
     return selfId;

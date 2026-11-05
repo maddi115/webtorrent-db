@@ -4,6 +4,7 @@ import { linkPeers } from '../network/linkPeers.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
 import { extractSlug, isURL } from '../../shared/urlParser.js';
+import { getDownloadMagnet } from '../../shared/links.js';
 import { downloadManager } from '../downloads/downloadManager.js';
 import {
     escapeHTML, MAX_AVATAR_CHARS, MAX_THUMB_CHARS, safeImage, safeLink, safeThumbHash
@@ -121,13 +122,15 @@ function renderActions(entry) {
     const state = downloadStates.get(entry.entryId) || 'idle';
     const buttons = [];
 
-    if (entry.magnet) {
+    if (getDownloadMagnet(entry.magnet)) {
         const label = { idle: 'Download', downloading: 'Downloading', downloaded: 'Downloaded' }[state];
         buttons.push(`<button type="button" data-action="copy" data-entry-id="${id}">Copy</button>`);
         buttons.push(`<button type="button" data-action="download" data-entry-id="${id}" ${state === 'idle' ? '' : 'disabled'}>${label}</button>`);
     }
-    if (entry.instantIOLink) {
-        buttons.push(`<a href="${escapeHTML(safeLink(entry.instantIOLink))}" target="_blank" rel="noopener noreferrer">instant.io</a>`);
+    const instantLink = entry.instantIOLink
+        || (entry.magnet?.startsWith('https://instant.io/') ? entry.magnet : null);
+    if (instantLink) {
+        buttons.push(`<a href="${escapeHTML(safeLink(instantLink))}" target="_blank" rel="noopener noreferrer">instant.io</a>`);
     }
 
     return buttons.join('') || '<span class="result-muted">No link</span>';
@@ -223,7 +226,7 @@ function handleTableClick(event) {
     } else if (action === 'preview') {
         openPreview(entryId);
     } else if (action === 'copy' && entry) {
-        navigator.clipboard.writeText(entry.magnet);
+        navigator.clipboard.writeText(getDownloadMagnet(entry.magnet));
         showToast('📋 Magnet link copied');
     } else if (action === 'download' && entry) {
         startDownload(entry);
@@ -234,7 +237,7 @@ function startDownload(entry) {
     downloadStates.set(entry.entryId, 'downloading');
     renderResults();
 
-    downloadManager.startDownload(entry.magnet, entry.sourceURL, entry.title, () => {
+    downloadManager.startDownload(getDownloadMagnet(entry.magnet), entry.sourceURL, entry.title, () => {
         downloadStates.set(entry.entryId, 'downloaded');
         trackDownload(extractSlug(entry.sourceURL));
         renderResults();

@@ -42,3 +42,12 @@ export function buildMagnet(hash) {
     )).join('');
     return `${MAGNET_PREFIX}${hex}`;
 }
+
+// Accepts a magnet, or an instant.io link that contains a torrent hash
+export function getDownloadMagnet(value) {
+    if (typeof value !== 'string') return null;
+    if (value.startsWith('magnet:?')) return value;
+
+    const match = value.match(/^https:\/\/instant\.io\/#([0-9a-f]{40})/i);
+    return match ? `${MAGNET_PREFIX}${match[1].toLowerCase()}` : null;
+}
