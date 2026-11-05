@@ -3,7 +3,6 @@ import { searchEntries, getAllEntries, trackSearch, getStats } from '../storage/
 import { contentDHT } from '../network/contentDHT.js';
 import { peerManager } from '../network/peerManager.js';
 import { presenceManager } from '../network/presence.js';
-import { connectToPeer } from '../network/dht.js';
 import { extractSlug, isURL, normalizeSearchQuery } from '../../shared/urlParser.js';
 import { downloadManager } from '../downloads/downloadManager.js';
 import { logger } from '../../shared/logger.js';

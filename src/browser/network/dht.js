@@ -1,133 +1,48 @@
-// dht.js - Wait for WebSocket to be open before sending
-import Peer from 'peerjs';
+// dht.js - Find peers through public Nostr relays with Trystero.
+// Trystero introduces the browsers, then WebRTC connects them directly.
+import { joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';
-import { contentDHT } from './contentDHT.js';
 import { logger } from '../../shared/logger.js';
-import { getUsername } from '../../shared/username.js';
 
-let myPeer;
-let myPeerId;
-const SIGNALING_SERVER = 'ws://localhost:9000';
+const APP_ID = 'maddi115-webtorrent-p2p-db';
+const ROOM_ID = 'public-v1';
 
-const socket = new WebSocket(SIGNALING_SERVER);
-let socketReady = false;
+const room = joinRoom({ appId: APP_ID }, ROOM_ID);
+const messages = room.makeAction('message');
 
-socket.addEventListener('open', () => {
-    logger.info('✅ Connected to signaling server');
-    socketReady = true;
-    
-    // If peer ID already exists, register now
-    if (myPeerId) {
-        registerWithServer();
-    }
-});
-
-socket.addEventListener('message', async (event) => {
-    const message = JSON.parse(event.data);
-
-    if (message.type === 'peers') {
-        const peerList = message.peers.filter(p => p !== myPeerId);
-        logger.info(`📋 Discovered ${peerList.length} peers from signaling server`);
-
-        peerList.forEach(peerId => {
-            connectToPeer(peerId);
-        });
-    }
-});
-
-socket.addEventListener('error', (error) => {
-    logger.error('Signaling server error:', error);
-});
-
-function registerWithServer() {
-    if (socketReady && myPeerId) {
-        console.log('📤 Registering with server, peerId:', myPeerId);
-        socket.send(JSON.stringify({
-            type: 'register',
-            peerId: myPeerId
-        }));
-        logger.info('🔗 Registered with signaling server');
-    }
+// Same shape the rest of the app expects from a peer connection
+function createConnection(peerId) {
+    return {
+        peer: peerId,
+        open: true,
+        send: (message) => messages.send(message, { target: peerId })
+    };
 }
 
-myPeer = new Peer({
-    config: {
-        iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
-        ]
+function getConnection(peerId) {
+    if (!peerManager.hasPeer(peerId)) {
+        peerManager.addPeer(createConnection(peerId));
     }
-});
-
-myPeer.on('open', (id) => {
-    myPeerId = id;
-    logger.info(`✅ My peer ID: ${id}`);
-    
-    // Register if socket is already open
-    registerWithServer();
-});
-
-myPeer.on('connection', (conn) => {
-    peerManager.addPeer(conn);
-});
-
-myPeer.on('error', (err) => {
-    logger.error('PeerJS error:', err);
-});
-
-export function connectToPeer(peerId) {
-    if (peerManager.hasPeer(peerId)) {
-        const shortId = peerId.split('-')[0];
-        logger.info(`✅✅ Connection already open: ${peerId}`);
-        return;
-    }
-
-    const shortId = peerId.split('-')[0];
-    logger.info(`🔗 Connecting to peer: ${shortId}`);
-
-    const conn = myPeer.connect(peerId, {
-        reliable: true
-    });
-
-    conn.on('open', async () => {
-        logger.info(`✅ Outgoing connection established: ${peerId}`);
-        peerManager.peers.set(peerId, conn);
-        peerManager.peerIds.add(shortId);
-        peerManager.updatePeerCount();
-        
-        // SEND HANDSHAKE ON OUTGOING CONNECTION
-        const myUsername = getUsername();
-        console.log('🤝 SENDING handshake (outgoing):', myUsername, 'to peer:', shortId);
-        conn.send({
-            type: 'handshake',
-            username: myUsername
-        });
-        
-        peerManager.setupPeerListeners(conn);
-
-        contentDHT.announceAll();
-    });
-
-    conn.on('error', (err) => {
-        logger.error(`Connection error with ${peerId}:`, err);
-    });
-
-    conn.on('close', async () => {
-        logger.warn(`❌ Connection closed: ${peerId}`);
-        
-        // Mark user as offline
-        const { presenceManager } = await import('./presence.js');
-        const username = presenceManager.getUserByPeerId(peerId);
-        if (username) {
-            presenceManager.setOffline(username);
-        }
-        
-        peerManager.peers.delete(peerId);
-        peerManager.peerIds.delete(shortId);
-        peerManager.updatePeerCount();
-    });
+    return peerManager.getPeer(peerId);
 }
+
+room.onPeerJoin = (peerId) => {
+    logger.info(`✅ Connected to peer: ${peerId}`);
+    getConnection(peerId);
+};
+
+room.onPeerLeave = (peerId) => {
+    logger.warn(`❌ Peer left: ${peerId}`);
+    peerManager.removePeer(peerId);
+};
+
+messages.onMessage = (data, { peerId }) => {
+    peerManager.handlePeerData(data, getConnection(peerId));
+};
+
+logger.info(`✅ My peer ID: ${selfId}`);
+logger.info(`🔗 Looking for peers in room: ${ROOM_ID}`);
 
 export function getMyPeerId() {
-    return myPeerId;
+    return selfId;
 }

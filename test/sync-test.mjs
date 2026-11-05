@@ -8,7 +8,7 @@ import net from 'node:net';
 import { pathToFileURL } from 'node:url';
 
 const APP_URL = 'http://localhost:3000';
-const WAIT_MS = 15000;
+const WAIT_MS = 45000;
 const ID = Date.now();
 const results = [];
 const children = [];
@@ -49,8 +49,9 @@ async function openPeer(browser, name, setup) {
 const waitForPeers = (page, count) => page.waitForFunction(
     (n) => Number(document.getElementById('peer-count').textContent) >= n, count, { timeout: WAIT_MS });
 
-async function addLink(page, url, { magnet = '', instantIO = '' }) {
+async function addLink(page, url, { magnet = '', instantIO = '', title = '' }) {
     await page.click('#add-entry-btn');
+    await page.fill('#entry-title', title);
     await page.fill('#source-url', url);
     await page.fill('#magnet-link', magnet);
     await page.fill('#instantio-link', instantIO);
@@ -94,7 +95,6 @@ async function countLink(page, url) {
 }
 
 export async function run({ setup } = {}) {
-    await ensureServer(9000, 'npm', ['start'], 'node');
     await ensureServer(3000, 'npx', ['vite', '--port', '3000'], '.');
     const browser = await chromium.launch();
     try {
@@ -124,6 +124,17 @@ export async function run({ setup } = {}) {
         const got = await hasLink(b, u3);
         report('A to B: instant.io-only link', !!got);
         report('instant.io link survives sync', got?.instantIOLink === io, `got ${got?.instantIOLink}`);
+
+        const u4 = `https://example.com/t/fake-link-d-${ID}/4`;
+        const customTitle = `My Custom Title ${ID}`;
+        await addLink(a, u4, { magnet: `magnet:?xt=urn:btih:${hash}`, title: customTitle });
+        report('Custom title survives sync', (await hasLink(b, u4))?.title === customTitle);
+
+        await b.fill('#search-input', customTitle);
+        const titleShown = await b.waitForFunction(
+            (t) => document.getElementById('results-container').textContent.includes(t),
+            customTitle, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Search finds and shows custom title', titleShown);
 
         const c = await openPeer(browser, 'C', setup);
         await waitForPeers(c, 2);

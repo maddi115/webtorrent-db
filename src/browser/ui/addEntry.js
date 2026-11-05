@@ -26,6 +26,7 @@ export function initAddEntry() {
     });
     
     addBtn.addEventListener('click', async () => {
+        const customTitle = document.getElementById('entry-title').value.trim();
         const sourceURL = document.getElementById('source-url').value.trim();
         const magnetLink = document.getElementById('magnet-link').value.trim();
         const instantIOLink = document.getElementById('instantio-link').value.trim();
@@ -42,7 +43,7 @@ export function initAddEntry() {
             return;
         }
         
-        const title = extractTitle(sourceURL);
+        const title = customTitle || extractTitle(sourceURL);
         const username = getUsername();
         
         const entry = {
@@ -63,6 +64,7 @@ export function initAddEntry() {
         
         showToast(`✅ Added: ${title}`);
         
+        document.getElementById('entry-title').value = '';
         document.getElementById('source-url').value = '';
         document.getElementById('magnet-link').value = '';
         document.getElementById('instantio-link').value = '';

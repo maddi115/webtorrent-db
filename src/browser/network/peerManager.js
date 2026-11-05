@@ -14,50 +14,27 @@ class PeerManager {
 
     addPeer(connection) {
         const shortId = connection.peer.split('-')[0];
-        logger.info(`📞 Incoming connection from: ${connection.peer}`);
+        this.peers.set(connection.peer, connection);
+        this.peerIds.add(shortId);
+        this.updatePeerCount();
 
-        connection.on('open', () => {
-            logger.info(`✅ Incoming connection established: ${connection.peer}`);
-            this.peers.set(connection.peer, connection);
-            this.peerIds.add(shortId);
-            this.updatePeerCount();
-            
-            // Send username handshake
-            const myUsername = getUsername();
-            console.log('🤝 SENDING handshake (incoming):', myUsername, 'to peer:', shortId);
-            connection.send({
-                type: 'handshake',
-                username: myUsername
-            });
-            
-            this.setupPeerListeners(connection);
+        connection.send({
+            type: 'handshake',
+            username: getUsername()
         });
-
-        connection.on('error', (err) => {
-            logger.error('Connection error:', err);
-        });
-
-        connection.on('close', () => {
-            logger.warn(`❌ Connection closed: ${connection.peer}`);
-            
-            // Mark user as offline
-            const username = presenceManager.getUserByPeerId(connection.peer);
-            if (username) {
-                console.log('⚪ MARKING OFFLINE:', username, 'peerId:', connection.peer);
-                presenceManager.setOffline(username);
-            }
-            
-            this.peers.delete(connection.peer);
-            this.peerIds.delete(shortId);
-            this.updatePeerCount();
-            logger.info(`Removed peer: ${connection.peer}`);
-        });
+        contentDHT.announceAll();
     }
 
-    setupPeerListeners(connection) {
-        connection.on('data', (data) => {
-            this.handlePeerData(data, connection);
-        });
+    removePeer(peerId) {
+        const username = presenceManager.getUserByPeerId(peerId);
+        if (username) {
+            presenceManager.setOffline(username);
+        }
+
+        contentDHT.removePeer(peerId);
+        this.peers.delete(peerId);
+        this.peerIds.delete(peerId.split('-')[0]);
+        this.updatePeerCount();
     }
 
     handlePeerData(data, connection) {
