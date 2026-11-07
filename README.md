@@ -7,7 +7,7 @@ Each browser keeps its own copy and shares links directly with other browsers.
 
 ## What it does
 
-- Topic rooms that split automatically when they fill up
+- Topic rooms made of small cells of 4 people, linked into one network
 - Direct browser-to-browser sharing over WebRTC
 - Local storage and full-text search with WASM SQLite
 - Smart sync that sends only the links another peer is missing
@@ -16,7 +16,8 @@ Each browser keeps its own copy and shares links directly with other browsers.
 - Profile pictures and custom usernames of up to 5 letters
 - A live table showing who is online
 - Sharing stats and a seeding switch
-- An optional helper that keeps rooms online from your PC
+- An optional helper that keeps rooms online and links up to 16 cells
+- A bootstrap relay on your PC, used alongside public relays
 - In-browser WebTorrent downloads
 
 ## How it works
@@ -27,7 +28,9 @@ Each browser keeps its own copy and shares links directly with other browsers.
 4. New users with a big gap download a snapshot from peers.
 5. Smart sync compares fingerprints and swaps whatever is still missing.
 6. New links go straight to connected peers.
-7. Bridge peers pass links between split rooms.
+7. In each cell, the first person links to the next cell in a ring,
+   and the second adds a random shortcut, so every cell stays connected.
+   Each browser keeps about 5 to 10 connections, however big the room gets.
 
 Relays only make introductions. Links and images travel directly between browsers.
 
@@ -51,7 +54,9 @@ Open http://localhost:3000 in two browsers and pick the same room.
 ## Keep rooms online
 
 The helper runs the app in a hidden browser, so links stay available when nobody else is online.
-It also serves the app, so you only need one terminal.
+It also serves the app and starts a bootstrap relay at ws://localhost:7777,
+so browsers on that address always find each other, even if public relays fail.
+You only need one terminal.
 
 ```bash
 npm run helper -- books
@@ -60,6 +65,14 @@ npm run helper -- books
 Open http://localhost:4173/?room=books
 
 Rooms: `general`, `movies`, `music`, `software`, `games`, and `books`.
+
+## Network settings
+
+Copy `.env.example` to `.env.local` to add your own bootstrap relays or switch on TURN.
+TURN is off by default.
+
+To let other PCs use your bootstrap relay, run `npm run relay -- --public`
+behind a secure address. Browsers on https pages need `wss://` relays.
 
 ## Test it
 

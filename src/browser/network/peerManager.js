@@ -24,26 +24,11 @@ class PeerManager {
         this.profiles = new Map();
         this.requested = new Set();
         this.onMembersChanged = () => {};
+        this.onNetworkInfo = () => {};
     }
 
     resetRequests() {
         this.requested.clear();
-    }
-
-    getRoomMembers(roomId) {
-        return [...this.profiles.entries()]
-            .filter(([peerId, profile]) => (
-                this.peers.get(peerId)?.room === roomId
-                && !profile.bridge
-                && Number.isFinite(profile.joinedAt)
-            ))
-            .map(([peerId, profile]) => ({ peerId, joinedAt: profile.joinedAt }));
-    }
-
-    removeRoomPeers(roomId) {
-        [...this.peers.values()]
-            .filter((connection) => connection.room === roomId)
-            .forEach((connection) => this.removePeer(connection.peer));
     }
 
     forwardEntry(entry, sourcePeerId) {
@@ -66,7 +51,8 @@ class PeerManager {
             links: 0,
             connectedAt: Date.now(),
             joinedAt: null,
-            bridge: false
+            home: undefined,
+            role: null
         });
 
         this.statusChanged();
@@ -76,8 +62,7 @@ class PeerManager {
             type: 'handshake',
             username: getUsername(),
             avatar: getAvatar(),
-            joinedAt: connection.joinedAt,
-            bridge: connection.bridge,
+            ...connection.info(),
             links: await getEntryCount()
         });
     }
@@ -122,6 +107,10 @@ class PeerManager {
 
             case 'peer_status':
                 this.handlePeerStatus(data, connection);
+                break;
+
+            case 'cells':
+                this.onNetworkInfo(data);
                 break;
 
             case 'sync_fingerprints':
@@ -194,7 +183,10 @@ class PeerManager {
         if (!profile) return;
 
         profile.joinedAt = Number.isFinite(data.joinedAt) ? data.joinedAt : Date.now();
-        profile.bridge = data.bridge === true;
+        profile.home = typeof data.home === 'string' ? data.home.slice(0, 200) : null;
+        profile.role = data.role === 'helper' ? 'helper' : null;
+        profile.ring = Number.isSafeInteger(data.ring) ? data.ring : null;
+        this.onNetworkInfo(data);
         this.handleProfile(data, connection);
         this.onMembersChanged();
         this.chooseSync(data, connection);

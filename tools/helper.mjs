@@ -7,11 +7,13 @@ import { mkdirSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { startRelay } from './bootstrapRelay.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = path.join(ROOT, '.helper-data');
 const VITE = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
 const PORT = 4173;
+const RELAY_PORT = Number(process.env.RELAY_PORT) || 7777;
 const ROOMS = ['general', 'movies', 'music', 'software', 'games', 'books'];
 
 // Each helper has a saved browser profile, so its links survive restarts
@@ -26,7 +28,7 @@ export async function openHelper({ room, baseURL, dataDir, query = '', setup }) 
     });
 
     const page = await context.newPage();
-    await page.goto(`${baseURL}/?room=${room}${query}`);
+    await page.goto(`${baseURL}/?room=${room}&role=helper${query}`);
     await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
     return { page, context };
 }
@@ -55,7 +57,10 @@ async function main() {
     if (unknown) throw new Error(`Unknown room: ${unknown}. Rooms: ${ROOMS.join(', ')}`);
 
     console.log('Building the app...');
-    const build = spawnSync(process.execPath, [VITE, 'build'], { cwd: ROOT, stdio: 'ignore' });
+    const relay = startRelay({ port: RELAY_PORT });
+    const relayURL = `ws://localhost:${RELAY_PORT}`;
+    const env = { ...process.env, VITE_BOOTSTRAP_RELAYS: relayURL };
+    const build = spawnSync(process.execPath, [VITE, 'build'], { cwd: ROOT, stdio: 'ignore', env });
     if (build.status !== 0) throw new Error('The app did not build');
 
     const website = spawn(
@@ -79,20 +84,24 @@ async function main() {
             const status = await page.evaluate(() => ({
                 links: document.getElementById('entry-count').textContent,
                 peers: document.getElementById('peer-count').textContent,
-                relays: document.getElementById('peer-relay-count').textContent
+                relays: document.getElementById('peer-relay-count').textContent,
+                cells: document.getElementById('peer-room-name').textContent
             }));
-            console.log(`${room}: ${status.links} links, ${status.peers} peers, ${status.relays} relays`);
+            console.log(`${room}: ${status.links} links, ${status.peers} peers, ${status.relays} relays, ${status.cells}`);
         }
+        console.log(`bootstrap relay: ${relay.stats.clients} browsers connected`);
     };
 
     const stop = async () => {
         await Promise.all(helpers.map(({ context }) => context.close()));
+        await relay.close();
         website.kill();
         process.exit(0);
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
 
+    console.log(`Bootstrap relay: ${relayURL}`);
     console.log(`Helper is online in: ${rooms.join(', ')}`);
     console.log('Leave this running. Press Ctrl+C to stop.');
     await report();

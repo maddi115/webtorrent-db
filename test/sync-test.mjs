@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openHelper } from '../tools/helper.mjs';
+import { startRelay } from '../tools/bootstrapRelay.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
@@ -237,7 +238,7 @@ export async function run({ setup } = {}) {
         const f = await openPeer(browser, 'F', setup, splitOptions);
         const roomText = (page) => page.evaluate(() => document.getElementById('peer-room-name').textContent);
         const moved = await f.waitForFunction(
-            () => document.getElementById('peer-room-name').textContent === 'general 2',
+            () => document.getElementById('peer-room-name').textContent.startsWith('general 2'),
             null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
         report('Full room splits automatically', moved, await roomText(f));
 
@@ -394,6 +395,59 @@ export async function run({ setup } = {}) {
         report('Peers connect after rejoining', rejoined);
         await aloneA.close();
         await aloneB.close();
+
+        const relay = startRelay({ port: 7791 });
+        const relayPages = [];
+        for (const name of ['RelayA', 'RelayB']) {
+            const context = await browser.newContext();
+            await context.routeWebSocket(/^wss:/, (socket) => socket.close());
+            await context.route('https://cdn.jsdelivr.net/**', (route) => route.abort());
+            const page = await context.newPage();
+            await page.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-bootstrap&relay=ws://localhost:7791`);
+            await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
+            relayPages.push({ page, context });
+        }
+        const viaBootstrap = await Promise.all(relayPages.map(({ page }) => waitForPeers(page, 1)))
+            .then(() => true).catch(() => false);
+        report('Peers meet through the bootstrap relay alone', viaBootstrap, `${relay.stats.events} introductions`);
+        await Promise.all(relayPages.map(({ context }) => context.close()));
+
+        const meshOptions = `testRoom=${TEST_ROOM}-mesh&capacity=3&visitors=2&linkRetryMs=1500&linkCheckMs=4000`
+            + '&relay=ws://localhost:7791&publicRelays=off';
+        const mesh = [];
+        for (let index = 0; index < 12; index++) {
+            mesh.push(await openPeer(browser, `Mesh${index}`, setup, meshOptions));
+            await new Promise((r) => setTimeout(r, 400));
+        }
+        const meshState = () => Promise.all(mesh.map((page) => page.evaluate(async () => {
+            const { getCellStats } = await import('/src/browser/network/roomNetwork.js');
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            return { ...getCellStats(), peers: peerManager.peers.size };
+        })));
+        const settleDeadline = Date.now() + WAIT_MS;
+        let states = await meshState();
+        while (Date.now() < settleDeadline) {
+            const homes = new Set(states.map((state) => state.home));
+            if (homes.size >= 4 && states.every((state) => state.peers > 0)) break;
+            await new Promise((r) => setTimeout(r, 1000));
+            states = await meshState();
+        }
+        await new Promise((r) => setTimeout(r, 6000));
+        states = await meshState();
+        const cellCount = new Set(states.map((state) => state.home)).size;
+        const maxPeers = Math.max(...states.map((state) => state.peers));
+        const averagePeers = states.reduce((total, state) => total + state.peers, 0) / states.length;
+        report('Peers spread out into small cells', cellCount >= 4, `${cellCount} cells`);
+        report('Each browser keeps few connections', maxPeers <= 9 && averagePeers <= 7,
+            `average ${averagePeers.toFixed(1)}, max ${maxPeers}, of 11 others`);
+
+        const meshURL = `https://example.com/t/mesh-link-${ID}/1`;
+        await addLink(mesh[0], meshURL, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        const reached = await Promise.all(mesh.map((page) => hasLink(page, meshURL)));
+        const reachedCount = reached.filter(Boolean).length;
+        report('Links hop across every cell', reachedCount === mesh.length, `${reachedCount} of ${mesh.length}`);
+        await Promise.all(mesh.map((page) => page.close()));
+        await relay.close();
 
         const roomPage = await openPeer(browser, 'RoomLink', setup, `testRoom=${TEST_ROOM}-link&room=music`);
         report('Room links open the right topic', await roomPage.inputValue('#room-select') === 'music');
