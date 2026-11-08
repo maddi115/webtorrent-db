@@ -11,6 +11,7 @@ import { MAX_AVATAR_CHARS, MAX_PREVIEW_CHARS, safeImage, shortText } from '../..
 import { renderPeerTable } from '../ui/peerTable.js';
 import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
 import { handleFingerprints, handleLists, startSync } from './smartSync.js';
+import { receiveDeletes } from './deletes.js';
 import { handleChunk, handleChunkRequest, handleLinkGap, handleOffer } from './snapshotManager.js';
 
 const MAX_SYNC_ITEMS = 5000;
@@ -138,6 +139,10 @@ class PeerManager {
 
             case 'ping':
                 connection.send({ type: 'pong' });
+                break;
+
+            case 'delete':
+                receiveDeletes(data.deletes, connection.peer);
                 break;
 
             case 'pong':

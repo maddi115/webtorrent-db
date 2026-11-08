@@ -2,7 +2,7 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { getEntryId } from '../../shared/entryId.js';
 import { cleanRemoteEntry } from '../../shared/entryRules.js';
-import { verifyEntry } from '../../shared/signing.js';
+import { verifyDelete, verifyEntry } from '../../shared/signing.js';
 import {
     compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
 } from '../../shared/snapshot.js';
@@ -77,6 +77,12 @@ const SCHEMA = `
     CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT
+    );
+    CREATE TABLE IF NOT EXISTS deletions (
+        entry_id TEXT PRIMARY KEY,
+        author_key TEXT NOT NULL,
+        signature TEXT NOT NULL,
+        deleted_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS authors (
         name TEXT PRIMARY KEY,
@@ -246,10 +252,43 @@ function isBlocked(authorKey, now) {
     return false;
 }
 
+// A delete note, if this link's own author deleted it
+function deletionFor(entryId, authorKey) {
+    const note = selectOne(
+        'SELECT entry_id AS entryId, author_key AS authorKey, signature FROM deletions WHERE entry_id = ?',
+        [entryId]
+    );
+    return note && note.authorKey === authorKey ? note : null;
+}
+
+// Only the key that signed a post can delete it. The note is kept, so the post cannot come back.
+// Notes are only kept for posts this browser has, so nobody can flood peers with junk notes.
+async function applyDeletes(notes) {
+    const applied = [];
+    for (const note of notes) {
+        const entry = selectOne('SELECT room, author_key AS authorKey FROM entries WHERE entry_id = ?', [note?.entryId]);
+        if (!entry || entry.authorKey !== note.authorKey) continue;
+        if (!await verifyDelete(note)) continue;
+
+        db.transaction(() => {
+            db.exec({
+                sql: `INSERT OR IGNORE INTO deletions (entry_id, author_key, signature, deleted_at)
+                      VALUES (?, ?, ?, ?)`,
+                bind: [note.entryId, note.authorKey, note.signature, Date.now()]
+            });
+            db.exec({ sql: 'DELETE FROM entries WHERE entry_id = ?', bind: [note.entryId] });
+        });
+        syncIndexes.delete(entry.room);
+        snapshots.delete(entry.room);
+        applied.push({ entryId: note.entryId, authorKey: note.authorKey, signature: note.signature });
+    }
+    return applied;
+}
+
 // The same rules for every link from peers: signed, not changed, not too many
 async function receiveEntries(room, rawEntries) {
     const now = Date.now();
-    const result = { saved: [], rejected: {} };
+    const result = { saved: [], rejected: {}, deleted: [] };
     const reject = (reason) => { result.rejected[reason] = (result.rejected[reason] || 0) + 1; };
     const checked = [];
 
@@ -261,6 +300,12 @@ async function receiveEntries(room, rawEntries) {
         if (isBlocked(entry.authorKey, now)) { reject('blocked'); continue; }
 
         entry.entryId = await getEntryId(entry);
+        const note = deletionFor(entry.entryId, entry.authorKey);
+        if (note) {
+            reject('deleted');
+            result.deleted.push(note);
+            continue;
+        }
         if (db.selectValue('SELECT 1 FROM entries WHERE entry_id = ?', [entry.entryId]) === 1) {
             reject('known');
             continue;
@@ -305,6 +350,8 @@ const methods = {
     },
 
     receiveEntries,
+
+    applyDeletes,
 
     getUnsignedEntries() {
         return selectAll(`SELECT ${ENTRY_COLUMNS}, preview FROM entries WHERE signature IS NULL`);

@@ -87,6 +87,19 @@ export async function signEntry(entry, keys) {
     return entry;
 }
 
+// The exact text a delete note's signature covers
+export function getDeleteText(entryId) {
+    return `wtdb-delete-1\n${entryId}`;
+}
+
+export async function signDelete(entryId, keys) {
+    const signer = keys || await getMyKeys();
+    const signature = await crypto.subtle.sign(
+        'Ed25519', signer.privateKey, encoder.encode(getDeleteText(entryId))
+    );
+    return { entryId, authorKey: signer.publicKey, signature: toBase64Url(signature) };
+}
+
 async function getVerifyKey(publicKey) {
     if (verifyKeys.has(publicKey)) return verifyKeys.get(publicKey);
 
@@ -98,17 +111,27 @@ async function getVerifyKey(publicKey) {
     return key;
 }
 
-export async function verifyEntry(entry) {
-    if (!isPublicKey(entry.authorKey) || !isSignature(entry.signature)) return false;
+async function verifyText(publicKey, signature, text) {
+    if (!isPublicKey(publicKey) || !isSignature(signature)) return false;
 
     try {
         return await crypto.subtle.verify(
-            'Ed25519',
-            await getVerifyKey(entry.authorKey),
-            fromBase64Url(entry.signature),
-            encoder.encode(getSignedText(entry))
+            'Ed25519', await getVerifyKey(publicKey), fromBase64Url(signature), encoder.encode(text)
         );
     } catch {
         return false;
     }
+}
+
+export function verifyEntry(entry) {
+    return verifyText(entry.authorKey, entry.signature, getSignedText(entry));
+}
+
+export function isEntryId(value) {
+    return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
+}
+
+export function verifyDelete(note) {
+    if (!isEntryId(note?.entryId)) return Promise.resolve(false);
+    return verifyText(note.authorKey, note.signature, getDeleteText(note.entryId));
 }

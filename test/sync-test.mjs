@@ -305,6 +305,73 @@ export async function run({ setup } = {}) {
         report('Your old links get signed', oldLinks.mine && !oldLinks.theirs);
         report('Old duplicate copies merge into one', oldLinks.copies === 1, `${oldLinks.copies} copies`);
 
+        const deleteURL = `https://example.com/t/delete-me-${ID}/1`;
+        await addLink(a, deleteURL, { magnet: `magnet:?xt=urn:btih:${hash}`, instantIO: `https://instant.io/#${hash}` });
+        const copyOnB = await hasLink(b, deleteURL);
+        const deleteButton = (page) => page.$(`.results-table tr:has(a[href="${deleteURL}"]) [data-action="delete"]`);
+        await a.fill('#search-input', `delete-me-${ID}`);
+        await b.fill('#search-input', `delete-me-${ID}`);
+        await a.waitForSelector(`.results-table a[href="${deleteURL}"]`, { timeout: WAIT_MS });
+        await b.waitForSelector(`.results-table a[href="${deleteURL}"]`, { timeout: WAIT_MS });
+        await new Promise((r) => setTimeout(r, 500));
+        report('Your posts have a delete button', Boolean(await deleteButton(a)) && !(await deleteButton(b)));
+        report('Delete buttons fit in the table', await a.evaluate(() => {
+            const scroll = document.querySelector('.results-scroll');
+            return scroll.scrollWidth <= scroll.clientWidth;
+        }));
+
+        await (await deleteButton(a)).click();
+        const asksFirst = Boolean(await countLink(a, deleteURL)) && (await (await deleteButton(a)).textContent()) === 'Sure?';
+        await (await deleteButton(a)).click();
+        const goneFrom = async (page, url) => {
+            const deadline = Date.now() + WAIT_MS;
+            while (Date.now() < deadline) {
+                if (await countLink(page, url) === 0) return true;
+                await new Promise((r) => setTimeout(r, 200));
+            }
+            return false;
+        };
+        report('Delete asks "Sure?" first', asksFirst);
+        report('Deleting removes the post everywhere', await goneFrom(a, deleteURL) && await goneFrom(b, deleteURL));
+
+        const deleteChecks = await b.evaluate(async ({ old, stamp }) => {
+            const { getEntryByURL, importEntries, applyDeletes } = await import('/src/browser/storage/db.js');
+            const { toPublicEntry } = await import('/src/shared/entryId.js');
+            const { gossip } = await import('/src/browser/network/gossip.js');
+            const { signDelete } = await import('/src/shared/signing.js');
+            await gossip.receiveEntry(toPublicEntry(old), 'test-peer');
+            const cameBack = Boolean(await getEntryByURL(old.sourceURL));
+
+            const theirs = await getEntryByURL(`https://example.com/t/fake-link-a-${stamp}/1`);
+            const fakeDelete = await signDelete(theirs.entryId);
+            await applyDeletes([fakeDelete]);
+            const othersSafe = Boolean(await getEntryByURL(theirs.sourceURL));
+
+            const junk = await signDelete('ab'.repeat(16));
+            const junkKept = (await applyDeletes([junk])).length > 0;
+            return { cameBack, othersSafe, junkKept };
+        }, { old: copyOnB, stamp: ID });
+        report('Deleted posts do not come back', !deleteChecks.cameBack);
+        report('Only the author can delete a post', deleteChecks.othersSafe);
+        report('Junk delete notes are ignored', !deleteChecks.junkKept);
+
+        const lateContext = await browser.newContext();
+        if (setup) await setup(lateContext);
+        const late = await lateContext.newPage();
+        await late.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-solo-late`);
+        await late.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        await late.evaluate(async (old) => {
+            const { importEntries } = await import('/src/browser/storage/db.js');
+            await importEntries([old]);
+        }, copyOnB);
+        await late.goto(`${APP_URL}/?testRoom=${TEST_ROOM}`);
+        await late.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        await waitForPeers(late, 1);
+        report('Browsers that missed a delete catch up', await goneFrom(late, deleteURL));
+        await lateContext.close();
+        await a.fill('#search-input', '');
+        await b.fill('#search-input', '');
+
         const c = await openPeer(browser, 'C', setup);
         await waitForPeers(c, 2);
         const tableShown = await c.waitForFunction(() => {

@@ -195,6 +195,13 @@ export function receiveEntries(entries) {
     return ready('receiveEntries', getTopic(), entries);
 }
 
+// Returns the delete notes that changed something here
+export async function applyDeletes(notes) {
+    const applied = await ready('applyDeletes', notes);
+    if (applied.length) await updateEntryCount();
+    return applied;
+}
+
 export function searchEntries(query) {
     return ready('searchEntries', getTopic(), query);
 }

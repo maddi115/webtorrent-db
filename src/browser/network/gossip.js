@@ -5,6 +5,7 @@ import { linkPeers } from './linkPeers.js';
 import { extractSlug } from '../../shared/urlParser.js';
 import { fromPublicEntry, toPublicEntry } from '../../shared/entryId.js';
 import { logger } from '../../shared/logger.js';
+import { sendDeletes } from './deletes.js';
 
 // Counts why links from peers were turned away
 export const trustStats = { saved: 0, rejected: {} };
@@ -28,7 +29,9 @@ class GossipEngine {
         }
 
         try {
-            const { saved, rejected } = await receiveEntries([rawEntry]);
+            const { saved, rejected, deleted } = await receiveEntries([rawEntry]);
+            // Someone offered a post its author deleted, so tell them about the delete
+            sendDeletes(deleted, peerManager.getPeer(sourcePeerId));
             Object.entries(rejected).forEach(([reason, count]) => {
                 trustStats.rejected[reason] = (trustStats.rejected[reason] || 0) + count;
                 if (WARN_REASONS.has(reason)) logger.warn(`🚫 Link rejected: ${reason}`);

@@ -780,10 +780,10 @@ footer {
 }
 
 .results-table th:nth-child(1) { width: 52px; }
-.results-table th:nth-child(3) { width: 138px; }
-.results-table th:nth-child(4) { width: 50px; }
-.results-table th:nth-child(5) { width: 44px; }
-.results-table th:nth-child(6) { width: 198px; }
+.results-table th:nth-child(3) { width: 124px; }
+.results-table th:nth-child(4) { width: 44px; }
+.results-table th:nth-child(5) { width: 40px; }
+.results-table th:nth-child(6) { width: 250px; }
 
 .results-table th {
   height: 28px;
@@ -936,6 +936,21 @@ footer {
 .result-actions button:hover:not(:disabled),
 .result-actions a:hover {
   border-color: #888;
+}
+
+.result-actions .result-delete {
+  border-color: #6b2b2b;
+  color: #ff8a8a;
+}
+
+.result-actions .result-delete:hover:not(:disabled) {
+  border-color: #ff6b6b;
+}
+
+.result-actions .result-delete[data-confirm="yes"] {
+  background: #3a1111;
+  border-color: #ff6b6b;
+  color: #fff;
 }
 
 .result-actions button:disabled {

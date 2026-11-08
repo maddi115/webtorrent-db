@@ -12,6 +12,8 @@ import {
 import { thumbHashToImage } from '../../shared/images.js';
 import { openPreview } from './preview.js';
 import { watchThumbnails } from './thumbnails.js';
+import { getMyKeys } from '../../shared/signing.js';
+import { deleteOwnPost } from '../network/deletes.js';
 
 const ROWS_PER_PAGE = 20;
 const WHO_HAS_LIMIT = 50;
@@ -22,6 +24,9 @@ let searchTimeout;
 let lastWhoHasKey = '';
 let currentResults = [];
 let currentPage = 1;
+let myKey = null;
+getMyKeys().then((keys) => { myKey = keys.publicKey; }).catch(() => {});
+const CONFIRM_MS = 3000;
 
 export function initUI() {
     const searchInput = document.getElementById('search-input');
@@ -133,6 +138,10 @@ function renderActions(entry) {
         buttons.push(`<a href="${escapeHTML(safeLink(instantLink))}" target="_blank" rel="noopener noreferrer">instant.io</a>`);
     }
 
+    if (entry.signature && myKey && entry.authorKey === myKey) {
+        buttons.push(`<button type="button" class="result-delete" data-action="delete" data-entry-id="${id}" aria-label="Delete your post">Delete</button>`);
+    }
+
     return buttons.join('') || '<span class="result-muted">No link</span>';
 }
 
@@ -230,7 +239,28 @@ function handleTableClick(event) {
         showToast('📋 Magnet link copied');
     } else if (action === 'download' && entry) {
         startDownload(entry);
+    } else if (action === 'delete' && entry) {
+        confirmDelete(control, entry);
     }
+}
+
+// The first click asks "Sure?", the second click deletes
+async function confirmDelete(button, entry) {
+    if (button.dataset.confirm !== 'yes') {
+        button.dataset.confirm = 'yes';
+        button.textContent = 'Sure?';
+        setTimeout(() => {
+            if (button.isConnected) {
+                delete button.dataset.confirm;
+                button.textContent = 'Delete';
+            }
+        }, CONFIRM_MS);
+        return;
+    }
+
+    button.disabled = true;
+    const deleted = await deleteOwnPost(entry.entryId).catch(() => false);
+    showToast(deleted ? '🗑️ Post deleted' : 'Could not delete this post');
 }
 
 function startDownload(entry) {
