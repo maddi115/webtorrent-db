@@ -2,9 +2,20 @@
 import { isTopic } from './rooms.js';
 import { safeLink, safeThumbHash, shortText } from './safe.js';
 
+const PUBLIC_KEY = /^[A-Za-z0-9_-]{43}$/;
+const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
+
+export function isPublicKey(value) {
+    return typeof value === 'string' && PUBLIC_KEY.test(value);
+}
+
+export function isSignature(value) {
+    return typeof value === 'string' && SIGNATURE.test(value);
+}
+
 export function cleanRemoteEntry(rawEntry, expectedRoom) {
     if (typeof rawEntry?.sourceURL !== 'string' || !rawEntry.sourceURL) return null;
-    if (!Number.isFinite(rawEntry.timestamp)) return null;
+    if (!Number.isSafeInteger(rawEntry.timestamp) || rawEntry.timestamp < 0) return null;
 
     const room = rawEntry.room || 'general';
     if (!isTopic(room) || room !== expectedRoom) return null;
@@ -20,6 +31,8 @@ export function cleanRemoteEntry(rawEntry, expectedRoom) {
         thumbHash: safeThumbHash(rawEntry.thumbHash),
         hasPreview: rawEntry.hasPreview === true,
         preview: null,
-        room
+        room,
+        authorKey: isPublicKey(rawEntry.authorKey) ? rawEntry.authorKey : null,
+        signature: isSignature(rawEntry.signature) ? rawEntry.signature : null
     };
 }

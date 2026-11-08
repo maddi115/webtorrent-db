@@ -3,6 +3,8 @@ import { openDB } from 'idb';
 import { getEntryId } from '../../shared/entryId.js';
 import { makeThumbHash, resizeImage } from '../../shared/images.js';
 import { getTopic } from '../../shared/rooms.js';
+import { signEntry } from '../../shared/signing.js';
+import { getUsername } from '../../shared/username.js';
 
 const OLD_DB_NAME = 'webtorrent-metadata-db-v2';
 const IMPORT_BATCH_SIZE = 200;
@@ -80,10 +82,31 @@ async function addMissingThumbHashes() {
     }
 }
 
+// Your own links from before signing get signed now, so they can sync again
+export async function signOldLinks() {
+    const me = getUsername();
+    const entries = await call('getUnsignedEntries');
+    let signed = 0;
+
+    for (const old of entries) {
+        if (old.addedBy !== me) continue;
+        const entry = { ...old };
+        try {
+            await signEntry(entry);
+        } catch {
+            continue;
+        }
+        await call('replaceEntry', old.entryId, entry);
+        signed += 1;
+    }
+    return signed;
+}
+
 export async function initDB() {
     ({ storageMode } = await call('open'));
     await migrateOldDatabase();
     await addMissingThumbHashes();
+    await signOldLinks();
     markReady();
     console.log(`✅ SQLite database ready (${storageMode})`);
 }
@@ -159,6 +182,17 @@ export function savePreview(entryId, preview) {
 export async function addEntry(entry) {
     await ready('addEntry', entry);
     await updateEntryCount();
+}
+
+// Returns 'saved', 'too-fast', or 'name-taken'
+export async function saveOwnEntry(entry) {
+    const status = await ready('saveOwnEntry', entry);
+    await updateEntryCount();
+    return status;
+}
+
+export function receiveEntries(entries) {
+    return ready('receiveEntries', getTopic(), entries);
 }
 
 export function searchEntries(query) {

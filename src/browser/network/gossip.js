@@ -1,18 +1,16 @@
 // gossip.js - Share links between peers as JSON
 import { peerManager } from './peerManager.js';
-import { addEntry, getEntryById } from '../storage/db.js';
+import { getEntryById, receiveEntries, updateEntryCount } from '../storage/db.js';
 import { linkPeers } from './linkPeers.js';
 import { extractSlug } from '../../shared/urlParser.js';
-import { fromPublicEntry, getEntryId, toPublicEntry } from '../../shared/entryId.js';
-import { cleanRemoteEntry } from '../../shared/entryRules.js';
-import { getTopic } from '../../shared/rooms.js';
+import { fromPublicEntry, toPublicEntry } from '../../shared/entryId.js';
 import { logger } from '../../shared/logger.js';
 
-class GossipEngine {
-    constructor() {
-        this.receiving = new Set();
-    }
+// Counts why links from peers were turned away
+export const trustStats = { saved: 0, rejected: {} };
+const WARN_REASONS = new Set(['bad-signature', 'name-taken', 'too-fast', 'blocked']);
 
+class GossipEngine {
     async init() {
         logger.info('✅ Gossip initialized (JSON)');
     }
@@ -29,18 +27,17 @@ class GossipEngine {
             return;
         }
 
-        const entry = cleanRemoteEntry(rawEntry, getTopic());
-        if (!entry) return;
-
-        entry.entryId = await getEntryId(entry);
-
-        if (this.receiving.has(entry.entryId)) return;
-        this.receiving.add(entry.entryId);
-
         try {
-            if (await getEntryById(entry.entryId)) return;
+            const { saved, rejected } = await receiveEntries([rawEntry]);
+            Object.entries(rejected).forEach(([reason, count]) => {
+                trustStats.rejected[reason] = (trustStats.rejected[reason] || 0) + count;
+                if (WARN_REASONS.has(reason)) logger.warn(`🚫 Link rejected: ${reason}`);
+            });
+            if (!saved.length) return;
 
-            await addEntry(entry);
+            trustStats.saved += 1;
+            const entry = await getEntryById(saved[0]);
+            await updateEntryCount();
             logger.info('✅ Entry saved to local DB');
             linkPeers.announceContent(extractSlug(entry.sourceURL));
             peerManager.forwardEntry(toPublicEntry(entry), sourcePeerId);
@@ -50,8 +47,6 @@ class GossipEngine {
             showToast(`📥 New: ${entry.title || 'Untitled'}`);
         } catch (error) {
             logger.error('Failed to save received entry:', error);
-        } finally {
-            this.receiving.delete(entry.entryId);
         }
     }
 }

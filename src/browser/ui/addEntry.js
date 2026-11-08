@@ -1,11 +1,11 @@
 // addEntry.js - Either, both, or at least one
-import { addEntry } from '../storage/db.js';
+import { saveOwnEntry } from '../storage/db.js';
 import { gossip } from '../network/gossip.js';
 import { linkPeers } from '../network/linkPeers.js';
 import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
 import { getTopic } from '../../shared/rooms.js';
-import { getEntryId } from '../../shared/entryId.js';
+import { signEntry } from '../../shared/signing.js';
 import { makeThumbHash, resizeImage } from '../../shared/images.js';
 import { cleanURL, getDownloadMagnet, normalizeMagnet } from '../../shared/links.js';
 
@@ -75,9 +75,17 @@ export function initAddEntry() {
             addedBy: username,
             room: getTopic()
         };
-        entry.entryId = await getEntryId(entry);
-        
-        await addEntry(entry);
+        await signEntry(entry);
+
+        const status = await saveOwnEntry(entry);
+        if (status === 'too-fast') {
+            showToast('Slow down: you can post 10 links a minute');
+            return;
+        }
+        if (status === 'name-taken') {
+            showToast('Someone else already uses this name. Pick a new one.');
+            return;
+        }
         
         const slug = extractSlug(sourceURL);
         linkPeers.announceContent(slug);

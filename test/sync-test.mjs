@@ -11,6 +11,7 @@ import { startRelay } from '../tools/bootstrapRelay.mjs';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
+import { webcrypto } from 'node:crypto';
 
 const APP_PORT = 3107;
 const APP_URL = `http://localhost:${APP_PORT}`;
@@ -19,6 +20,16 @@ const ID = Date.now();
 const TEST_ROOM = `test-${ID}`;
 const results = [];
 const children = [];
+
+// One shared test key, so seeded links match in every browser
+async function makeTestKey() {
+    const pair = await webcrypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+    const text = (buffer) => Buffer.from(buffer).toString('base64url');
+    return {
+        privateKey: text(await webcrypto.subtle.exportKey('pkcs8', pair.privateKey)),
+        publicKey: text(await webcrypto.subtle.exportKey('raw', pair.publicKey))
+    };
+}
 
 function report(name, ok, detail = '') {
     results.push(ok);
@@ -89,6 +100,7 @@ async function countLink(page, url) {
 export async function run({ setup } = {}) {
     await ensureServer(APP_PORT, process.execPath, ['node_modules/vite/bin/vite.js', '--port', String(APP_PORT), '--strictPort'], '.');
     const browser = await chromium.launch();
+    const testKey = await makeTestKey();
     try {
         const a = await openPeer(browser, 'A', setup);
         const b = await openPeer(browser, 'B', setup);
@@ -169,7 +181,7 @@ export async function run({ setup } = {}) {
             const { toPublicEntry } = await import('/src/shared/entryId.js');
             return JSON.stringify(toPublicEntry(await getEntryByURL(url))).length;
         }, cleanURL);
-        report('Link messages stay tiny', messageSize < 220, `${messageSize} bytes`);
+        report('Link messages stay small', messageSize < 340, `${messageSize} bytes with signature`);
 
         const unsafeTitle = '<img src=x onerror="window.unsafeRan=true">';
         const u6 = `https://example.com/t/fake-link-f-${ID}/6`;
@@ -180,6 +192,111 @@ export async function run({ setup } = {}) {
         await new Promise((r) => setTimeout(r, 1000));
         const unsafeRan = await b.evaluate(() => window.unsafeRan === true);
         report('Unsafe title stays plain text', !unsafeRan);
+
+        const signedOnB = await hasLink(b, u1);
+        const signatureValid = await b.evaluate(async (entry) => {
+            const { verifyEntry } = await import('/src/shared/signing.js');
+            return verifyEntry(entry);
+        }, signedOnB);
+        report('Links are signed by their author', Boolean(signedOnB?.signature) && signatureValid);
+
+        const trust = await b.evaluate(async ({ url, takenName, stamp }) => {
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { toPublicEntry } = await import('/src/shared/entryId.js');
+            const { gossip } = await import('/src/browser/network/gossip.js');
+            const { importSigningKey, signEntry, toBase64Url } = await import('/src/shared/signing.js');
+            const makeKeys = async () => {
+                const pair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+                return importSigningKey(
+                    toBase64Url(await crypto.subtle.exportKey('pkcs8', pair.privateKey)),
+                    toBase64Url(await crypto.subtle.exportKey('raw', pair.publicKey))
+                );
+            };
+            const makeLink = (name, addedBy, timestamp) => ({
+                sourceURL: `https://example.com/t/${name}-${stamp}/1`, magnet: null, instantIOLink: null,
+                title: name, addedBy, timestamp, room: 'general', hasPreview: false
+            });
+            const arrives = async (packed) => {
+                await gossip.receiveEntry(packed, 'test-peer');
+                return Boolean(await getEntryByURL(packed.u));
+            };
+
+            const original = toPublicEntry(await getEntryByURL(url));
+            const changed = await arrives({ ...original, u: `https://example.com/t/changed-${stamp}/1` });
+            const unsigned = { ...original, u: `https://example.com/t/unsigned-${stamp}/1` };
+            delete unsigned.k;
+            delete unsigned.g;
+            const unsignedSaved = await arrives(unsigned);
+
+            const thief = await makeKeys();
+            const stolen = await signEntry(makeLink('stolen-name', takenName, Date.now()), thief);
+            const stolenSaved = await arrives(toPublicEntry(stolen));
+
+            const spammer = await makeKeys();
+            const now = Date.now();
+            let spamSaved = 0;
+            for (let index = 0; index < 15; index++) {
+                const spam = await signEntry(makeLink(`spam-${index}`, `Spam${stamp}`, now + index * 1000), spammer);
+                if (await arrives(toPublicEntry(spam))) spamSaved += 1;
+            }
+            const later = await signEntry(makeLink('spam-later', `Spam${stamp}`, now - 30 * 60 * 1000), spammer);
+            const laterSaved = await arrives(toPublicEntry(later));
+
+            return { changed, unsignedSaved, stolenSaved, spamSaved, laterSaved };
+        }, { url: u1, takenName: await a.textContent('#username-display'), stamp: ID });
+        report('Changed links are rejected', !trust.changed);
+        report('Unsigned links are rejected', !trust.unsignedSaved);
+        report('Nobody can post under a taken name', !trust.stolenSaved);
+        report('Spam is capped at 10 links a minute', trust.spamSaved === 10, `${trust.spamSaved} of 15 saved`);
+        report('Spammers stay blocked', !trust.laterSaved);
+
+        const ownLimit = await b.evaluate(async (stamp) => {
+            const { saveOwnEntry } = await import('/src/browser/storage/db.js');
+            const { signEntry } = await import('/src/shared/signing.js');
+            const { getUsername } = await import('/src/shared/username.js');
+            const time = Date.now() - 20 * 60 * 1000;
+            const statuses = [];
+            for (let index = 0; index < 11; index++) {
+                const entry = await signEntry({
+                    sourceURL: `https://example.com/t/own-limit-${stamp}-${index}/1`, magnet: null,
+                    instantIOLink: null, title: `Own ${index}`, addedBy: getUsername(),
+                    timestamp: time + index * 1000, room: 'general', hasPreview: false
+                });
+                statuses.push(await saveOwnEntry(entry));
+            }
+            return statuses;
+        }, ID);
+        report('You can post 10 links a minute, not more',
+            ownLimit.filter((status) => status === 'saved').length === 10 && ownLimit[10] === 'too-fast');
+
+        const oldLinks = await b.evaluate(async (stamp) => {
+            const { getEntryByURL, importEntries, signOldLinks } = await import('/src/browser/storage/db.js');
+            const { getEntryId } = await import('/src/shared/entryId.js');
+            const { getUsername } = await import('/src/shared/username.js');
+            const makeOld = async (name, addedBy) => {
+                const entry = {
+                    sourceURL: `https://example.com/t/${name}-${stamp}/1`, magnet: null, title: name,
+                    addedBy, timestamp: 1700000000000, room: 'general', hasPreview: false
+                };
+                entry.entryId = await getEntryId(entry);
+                return entry;
+            };
+            const staleCopy = { ...await makeOld('my-old-link', getUsername()), entryId: 'f'.repeat(32) };
+            await importEntries([
+                await makeOld('my-old-link', getUsername()), staleCopy, await makeOld('their-old-link', 'Someone')
+            ]);
+            await signOldLinks();
+            const { getAllEntries } = await import('/src/browser/storage/db.js');
+            const copies = (await getAllEntries())
+                .filter((entry) => entry.sourceURL === `https://example.com/t/my-old-link-${stamp}/1`).length;
+            return {
+                copies,
+                mine: Boolean((await getEntryByURL(`https://example.com/t/my-old-link-${stamp}/1`))?.signature),
+                theirs: Boolean((await getEntryByURL(`https://example.com/t/their-old-link-${stamp}/1`))?.signature)
+            };
+        }, ID);
+        report('Your old links get signed', oldLinks.mine && !oldLinks.theirs);
+        report('Old duplicate copies merge into one', oldLinks.copies === 1, `${oldLinks.copies} copies`);
 
         const c = await openPeer(browser, 'C', setup);
         await waitForPeers(c, 2);
@@ -264,36 +381,33 @@ export async function run({ setup } = {}) {
         report('Same topic gets the link', Boolean(await hasLink(h, u9)));
 
         const syncOptions = `testRoom=${TEST_ROOM}-smart`;
-        const seedSyncLinks = async (page, onlyHere) => page.evaluate(async ({ only, time }) => {
+        const seedSyncLinks = async (page, onlyHere, offset) => page.evaluate(async ({ only, time, key, extraTime }) => {
             const { importEntries, updateEntryCount } = await import('/src/browser/storage/db.js');
-            const { getEntryId } = await import('/src/shared/entryId.js');
-            const makeEntry = async (name) => {
-                const entry = {
-                    sourceURL: `https://example.com/t/${name}/1`, title: name, addedBy: 'Sync Test',
-                    timestamp: time, room: 'general', magnet: null, hasPreview: false
-                };
-                entry.entryId = await getEntryId(entry);
-                return entry;
-            };
-            const shared = Array.from({ length: 2000 }, (_, i) => makeEntry(`shared-link-${i}`));
-            const extras = Array.from({ length: 5 }, (_, i) => makeEntry(`${only}-${i}`));
+            const { importSigningKey, signEntry } = await import('/src/shared/signing.js');
+            const keys = await importSigningKey(key.privateKey, key.publicKey);
+            const makeEntry = (name, timestamp) => signEntry({
+                sourceURL: `https://example.com/t/${name}/1`, title: name, addedBy: 'Sync Test',
+                timestamp, room: 'general', magnet: null, hasPreview: false
+            }, keys);
+            const shared = Array.from({ length: 2000 }, (_, i) => makeEntry(`shared-link-${i}`, time - i * 15000));
+            const extras = Array.from({ length: 5 }, (_, i) => makeEntry(`${only}-${i}`, extraTime - i * 300000));
             await importEntries(await Promise.all([...shared, ...extras]));
             await updateEntryCount();
-        }, { only: onlyHere, time: ID });
+        }, { only: onlyHere, time: ID, key: testKey, extraTime: ID - offset });
 
-        const seedPeer = async (name, onlyHere) => {
+        const seedPeer = async (name, onlyHere, offset) => {
             const context = await browser.newContext();
             if (setup) await setup(context);
             const page = await context.newPage();
             page.on('pageerror', (error) => console.log(`  [${name} error] ${error.message}`));
             await page.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-solo-${name}`);
             await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
-            await seedSyncLinks(page, onlyHere);
+            await seedSyncLinks(page, onlyHere, offset);
             await page.goto(`${APP_URL}/?${syncOptions}`);
             await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
             return { page, context };
         };
-        const [syncA, syncB] = await Promise.all([seedPeer('SyncA', 'only-a'), seedPeer('SyncB', 'only-b')]);
+        const [syncA, syncB] = await Promise.all([seedPeer('SyncA', 'only-a', 40000000), seedPeer('SyncB', 'only-b', 50000000)]);
         await Promise.all([waitForPeers(syncA.page, 1), waitForPeers(syncB.page, 1)]);
         const aGot = await hasLink(syncA.page, 'https://example.com/t/only-b-3/1');
         const bGot = await hasLink(syncB.page, 'https://example.com/t/only-a-3/1');
@@ -314,21 +428,18 @@ export async function run({ setup } = {}) {
             const page = await context.newPage();
             await page.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-solo-${name}`);
             await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
-            await page.evaluate(async (time) => {
+            await page.evaluate(async ({ time, key }) => {
                 const { importEntries, updateEntryCount } = await import('/src/browser/storage/db.js');
-                const { getEntryId } = await import('/src/shared/entryId.js');
-                const entries = await Promise.all(Array.from({ length: 3000 }, async (_, index) => {
-                    const entry = {
-                        sourceURL: `https://example.com/t/shared-archive-${index}-${(index * 7919).toString(36)}/${index}`,
-                        title: `Archive ${(index * 104729).toString(36)}`, addedBy: 'Archive', timestamp: time + index,
-                        room: 'general', magnet: null, hasPreview: false
-                    };
-                    entry.entryId = await getEntryId(entry);
-                    return entry;
-                }));
+                const { importSigningKey, signEntry } = await import('/src/shared/signing.js');
+                const keys = await importSigningKey(key.privateKey, key.publicKey);
+                const entries = await Promise.all(Array.from({ length: 3000 }, (_, index) => signEntry({
+                    sourceURL: `https://example.com/t/shared-archive-${index}-${(index * 7919).toString(36)}/${index}`,
+                    title: `Archive ${(index * 104729).toString(36)}`, addedBy: 'Archive', timestamp: time + index * 15000,
+                    room: 'general', magnet: null, hasPreview: false
+                }, keys)));
                 await importEntries(entries);
                 await updateEntryCount();
-            }, ID - 30 * 24 * 60 * 60 * 1000);
+            }, { time: ID - 30 * 24 * 60 * 60 * 1000, key: testKey });
             await page.goto(`${APP_URL}/?${shareOptions}`);
             await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
             return { page, context };
@@ -535,8 +646,10 @@ export async function run({ setup } = {}) {
         report('Profile pictures show in results', avatarInResults);
         await tablePage.close();
 
-        const snapshot = await a.evaluate(async () => {
+        const snapshot = await a.evaluate(async (key) => {
             const { getEntryId, toPublicEntry } = await import('/src/shared/entryId.js');
+            const { importSigningKey, signEntry, verifyEntry } = await import('/src/shared/signing.js');
+            const keys = await importSigningKey(key.privateKey, key.publicKey);
             const {
                 compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
             } = await import('/src/shared/snapshot.js');
@@ -554,8 +667,7 @@ export async function run({ setup } = {}) {
                     thumbHash: index % 2 === 0 ? 'AAAAAAAAAAAAAAAAAAAAAA==' : null,
                     hasPreview: index % 2 === 0
                 };
-                entry.entryId = await getEntryId(entry);
-                return entry;
+                return signEntry(entry, keys);
             }));
 
             const packed = packSnapshot('music', entries);
@@ -574,15 +686,18 @@ export async function run({ setup } = {}) {
                 .then(() => unpackSnapshot(new TextEncoder().encode('not a snapshot')))
                 .then(() => false, () => true);
 
+            const checks = await Promise.all(restored.entries.slice(0, 500).map(verifyEntry));
             return {
+                signaturesKept: checks.every(Boolean),
                 exact: originalIds.join() === restoredIds.join() && restored.room === 'music',
                 jsonBytes: JSON.stringify(entries.map(toPublicEntry)).length,
                 compressedBytes: compressed.length,
                 damagedRejected,
                 junkRejected
             };
-        });
+        }, testKey);
         report('Snapshot restores every link exactly', snapshot.exact);
+        report('Snapshots keep signatures valid', snapshot.signaturesKept);
         report('Snapshot is much smaller than JSON', snapshot.compressedBytes < snapshot.jsonBytes / 3,
             `${snapshot.compressedBytes} vs ${snapshot.jsonBytes} bytes`);
         report('Damaged snapshots are rejected', snapshot.damagedRejected && snapshot.junkRejected);

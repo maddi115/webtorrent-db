@@ -2,19 +2,26 @@
 import { extractTitle } from './urlParser.js';
 import { buildMagnet, getMagnetHash } from './links.js';
 
-// The same link details always make the same ID
-export async function getEntryId(entry) {
-    const parts = [
+// The exact text a link's signature covers
+export function getSignedText(entry) {
+    return [
+        'wtdb-link-1',
         entry.sourceURL,
         entry.magnet || '',
         entry.instantIOLink || '',
         entry.title || '',
         entry.addedBy || '',
-        entry.timestamp
-    ];
-    if (entry.room && entry.room !== 'general') parts.push(entry.room);
+        entry.timestamp,
+        entry.room || 'general',
+        entry.thumbHash || '',
+        entry.hasPreview ? 1 : 0,
+        entry.authorKey || ''
+    ].join('\n');
+}
 
-    const bytes = new TextEncoder().encode(parts.join('\n'));
+// The same link details always make the same ID
+export async function getEntryId(entry) {
+    const bytes = new TextEncoder().encode(getSignedText(entry));
     const hash = await crypto.subtle.digest('SHA-256', bytes);
     return Array.from(new Uint8Array(hash).slice(0, 16))
         .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -33,6 +40,8 @@ export function toPublicEntry(entry) {
     if (entry.room && entry.room !== 'general') packed.r = entry.room;
     if (entry.thumbHash) packed.b = entry.thumbHash;
     if (entry.preview || entry.hasPreview) packed.p = 1;
+    if (entry.authorKey) packed.k = entry.authorKey;
+    if (entry.signature) packed.g = entry.signature;
     return packed;
 }
 
@@ -46,6 +55,8 @@ export function fromPublicEntry(packed) {
         title: packed && 't' in packed ? packed.t : extractTitle(packed?.u),
         room: packed?.r,
         thumbHash: packed?.b,
-        hasPreview: packed?.p === 1
+        hasPreview: packed?.p === 1,
+        authorKey: packed?.k,
+        signature: packed?.g
     };
 }

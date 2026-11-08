@@ -286,7 +286,7 @@ class PeerManager {
 
         for (const id of data.ids.slice(0, MAX_SYNC_ITEMS)) {
             const entry = await getEntryById(id);
-            if (entry) {
+            if (entry?.signature) {
                 connection.send({ type: 'entry', entry: toPublicEntry(entry) });
             }
         }
@@ -295,7 +295,9 @@ class PeerManager {
     async handleEntryRequest(contentId, connection) {
         const { getRoomEntries } = await import('../storage/db.js');
         const entries = await getRoomEntries();
-        const match = entries.find((entry) => extractSlug(entry.sourceURL) === contentId);
+        const match = entries.find((entry) => (
+            entry.signature && extractSlug(entry.sourceURL) === contentId
+        ));
 
         if (match) {
             connection.send({ type: 'entry', entry: toPublicEntry(match) });

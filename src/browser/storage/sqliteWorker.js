@@ -2,6 +2,7 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { getEntryId } from '../../shared/entryId.js';
 import { cleanRemoteEntry } from '../../shared/entryRules.js';
+import { verifyEntry } from '../../shared/signing.js';
 import {
     compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
 } from '../../shared/snapshot.js';
@@ -9,17 +10,23 @@ import {
 const LOCK_NAME = 'webtorrent-sqlite-owner';
 const LOCK_WAIT_MS = 3000;
 const SEARCH_LIMIT = 200;
+const POSTS_PER_MINUTE = 10;
+const MINUTE_MS = 60 * 1000;
+const FUTURE_LIMIT_MS = 2 * 60 * 1000;
+const BLOCK_MS = 10 * 60 * 1000;
 
 const ENTRY_COLUMNS = `
     entry_id AS entryId, room, source_url AS sourceURL, magnet,
     instant_io_link AS instantIOLink, title, added_by AS addedBy, timestamp,
-    thumb, thumb_hash AS thumbHash, has_preview AS hasPreview
+    thumb, thumb_hash AS thumbHash, has_preview AS hasPreview,
+    author_key AS authorKey, signature
 `;
 
 let db;
 let storageMode = 'opfs';
 const syncIndexes = new Map();
 const snapshots = new Map();
+const blockedKeys = new Map();
 
 const SCHEMA = `
     CREATE TABLE IF NOT EXISTS entries (
@@ -71,6 +78,10 @@ const SCHEMA = `
         key TEXT PRIMARY KEY,
         value TEXT
     );
+    CREATE TABLE IF NOT EXISTS authors (
+        name TEXT PRIMARY KEY,
+        author_key TEXT NOT NULL
+    );
 `;
 
 function acquireOwnerLock() {
@@ -102,9 +113,15 @@ async function openDatabase() {
     db.exec('PRAGMA synchronous = NORMAL;');
     db.exec(SCHEMA);
     const columns = db.selectObjects('PRAGMA table_info(entries)');
-    if (!columns.some((column) => column.name === 'thumb_hash')) {
-        db.exec('ALTER TABLE entries ADD COLUMN thumb_hash TEXT');
-    }
+    const addColumn = (name) => {
+        if (!columns.some((column) => column.name === name)) {
+            db.exec(`ALTER TABLE entries ADD COLUMN ${name} TEXT`);
+        }
+    };
+    addColumn('thumb_hash');
+    addColumn('author_key');
+    addColumn('signature');
+    db.exec('CREATE INDEX IF NOT EXISTS entries_author_time ON entries(author_key, timestamp)');
     return { storageMode };
 }
 
@@ -123,7 +140,10 @@ function selectOne(sql, bind = []) {
 function getSyncIndex(room) {
     if (syncIndexes.has(room)) return syncIndexes.get(room);
 
-    const ids = db.selectValues('SELECT entry_id FROM entries WHERE room = ? ORDER BY entry_id', [room]);
+    const ids = db.selectValues(
+        'SELECT entry_id FROM entries WHERE room = ? AND signature IS NOT NULL ORDER BY entry_id',
+        [room]
+    );
     const totals = new Uint32Array((ids.length + 1) * 4);
 
     ids.forEach((id, index) => {
@@ -160,14 +180,16 @@ async function hashBytes(bytes, size) {
         .join('');
 }
 
+// Returns true when the link was new
 function insertEntry(entry) {
     syncIndexes.delete(entry.room || 'general');
     snapshots.delete(entry.room || 'general');
     db.exec({
         sql: `INSERT OR IGNORE INTO entries (
             entry_id, room, source_url, magnet, instant_io_link, title,
-            added_by, timestamp, thumb, thumb_hash, has_preview, preview
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            added_by, timestamp, thumb, thumb_hash, has_preview, preview,
+            author_key, signature
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         bind: [
             entry.entryId,
             entry.room || 'general',
@@ -180,9 +202,86 @@ function insertEntry(entry) {
             entry.thumb || null,
             entry.thumbHash || null,
             entry.hasPreview ? 1 : 0,
-            entry.preview || null
+            entry.preview || null,
+            entry.signature ? entry.authorKey : null,
+            entry.signature || null
         ]
     });
+    const added = db.changes() > 0;
+    if (!added || !entry.signature) return added;
+
+    if (entry.addedBy) {
+        db.exec({
+            sql: 'INSERT OR IGNORE INTO authors (name, author_key) VALUES (?, ?)',
+            bind: [entry.addedBy, entry.authorKey]
+        });
+    }
+    // A signed copy replaces an old unsigned copy of the same link
+    db.exec({
+        sql: `DELETE FROM entries WHERE signature IS NULL AND room = ? AND source_url = ?
+              AND IFNULL(added_by, '') = ?`,
+        bind: [entry.room || 'general', entry.sourceURL, entry.addedBy || '']
+    });
+    return true;
+}
+
+function nameOwner(name) {
+    if (!name) return null;
+    return db.selectValue('SELECT author_key FROM authors WHERE name = ?', [name]) ?? null;
+}
+
+function postsNear(authorKey, timestamp) {
+    return db.selectValue(
+        `SELECT COUNT(*) FROM entries
+         WHERE author_key = ? AND timestamp > ? AND timestamp < ? AND signature IS NOT NULL`,
+        [authorKey, timestamp - MINUTE_MS, timestamp + MINUTE_MS]
+    );
+}
+
+function isBlocked(authorKey, now) {
+    const blockedAt = blockedKeys.get(authorKey);
+    if (!blockedAt) return false;
+    if (now - blockedAt < BLOCK_MS) return true;
+    blockedKeys.delete(authorKey);
+    return false;
+}
+
+// The same rules for every link from peers: signed, not changed, not too many
+async function receiveEntries(room, rawEntries) {
+    const now = Date.now();
+    const result = { saved: [], rejected: {} };
+    const reject = (reason) => { result.rejected[reason] = (result.rejected[reason] || 0) + 1; };
+    const checked = [];
+
+    for (const rawEntry of rawEntries) {
+        const entry = cleanRemoteEntry(rawEntry, room);
+        if (!entry) { reject('invalid'); continue; }
+        if (!entry.signature) { reject('unsigned'); continue; }
+        if (entry.timestamp > now + FUTURE_LIMIT_MS) { reject('future'); continue; }
+        if (isBlocked(entry.authorKey, now)) { reject('blocked'); continue; }
+
+        entry.entryId = await getEntryId(entry);
+        if (db.selectValue('SELECT 1 FROM entries WHERE entry_id = ?', [entry.entryId]) === 1) {
+            reject('known');
+            continue;
+        }
+        if (!await verifyEntry(entry)) { reject('bad-signature'); continue; }
+        checked.push(entry);
+    }
+
+    checked.sort((a, b) => a.timestamp - b.timestamp);
+    db.transaction(() => checked.forEach((entry) => {
+        const owner = nameOwner(entry.addedBy);
+        if (owner && owner !== entry.authorKey) return reject('name-taken');
+        if (isBlocked(entry.authorKey, now)) return reject('blocked');
+        if (postsNear(entry.authorKey, entry.timestamp) >= POSTS_PER_MINUTE) {
+            blockedKeys.set(entry.authorKey, now);
+            return reject('too-fast');
+        }
+        if (insertEntry(entry)) result.saved.push(entry.entryId);
+        else reject('known');
+    }));
+    return result;
 }
 
 function escapeLike(value) {
@@ -194,6 +293,28 @@ const methods = {
 
     addEntry(entry) {
         insertEntry(entry);
+    },
+
+    // Your own posts follow the same limits peers check
+    saveOwnEntry(entry) {
+        const owner = nameOwner(entry.addedBy);
+        if (owner && owner !== entry.authorKey) return 'name-taken';
+        if (postsNear(entry.authorKey, entry.timestamp) >= POSTS_PER_MINUTE) return 'too-fast';
+        insertEntry(entry);
+        return 'saved';
+    },
+
+    receiveEntries,
+
+    getUnsignedEntries() {
+        return selectAll(`SELECT ${ENTRY_COLUMNS}, preview FROM entries WHERE signature IS NULL`);
+    },
+
+    replaceEntry(oldId, entry) {
+        db.transaction(() => {
+            db.exec({ sql: 'DELETE FROM entries WHERE entry_id = ?', bind: [oldId] });
+            insertEntry(entry);
+        });
     },
 
     importEntries(entries) {
@@ -243,7 +364,10 @@ const methods = {
     },
 
     getEntryCount(room) {
-        return db.selectValue('SELECT COUNT(*) FROM entries WHERE room = ?', [room]);
+        return db.selectValue(
+            'SELECT COUNT(*) FROM entries WHERE room = ? AND signature IS NOT NULL',
+            [room]
+        );
     },
 
     searchEntries(room, query) {
@@ -302,7 +426,8 @@ const methods = {
         if (cached?.cutoff === cutoff) return cached.info;
 
         const entries = selectAll(
-            `SELECT ${ENTRY_COLUMNS} FROM entries WHERE room = ? AND timestamp < ?`,
+            `SELECT ${ENTRY_COLUMNS} FROM entries
+             WHERE room = ? AND timestamp < ? AND signature IS NOT NULL`,
             [room, cutoff]
         );
         const bytes = await compressSnapshot(packSnapshot(room, entries));
@@ -336,17 +461,8 @@ const methods = {
         const snapshot = unpackSnapshot(await decompressSnapshot(bytes));
         if (snapshot.room !== room) throw new Error('Snapshot is for another room');
 
-        const entries = [];
-        for (const rawEntry of snapshot.entries) {
-            const entry = cleanRemoteEntry(rawEntry, room);
-            if (entry) {
-                entry.entryId = await getEntryId(entry);
-                entries.push(entry);
-            }
-        }
-
-        db.transaction(() => entries.forEach(insertEntry));
-        return entries.length;
+        const { saved } = await receiveEntries(room, snapshot.entries);
+        return saved.length;
     },
 
     saveAvatar(username, avatar) {

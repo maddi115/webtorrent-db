@@ -14,6 +14,8 @@ Each browser keeps its own copy and shares links directly with other browsers.
 - Compressed room snapshots, shared in verified chunks from several peers
 - Tiny ThumbHash previews, with images loaded only when needed
 - Profile pictures and custom usernames of up to 5 letters
+- Signed posts, so nobody can fake your name or change your links
+- A spam limit of 10 links a minute per person
 - A live table showing who is online
 - Sharing stats and a seeding switch
 - An optional helper that keeps rooms online and links up to 16 cells
@@ -28,6 +30,9 @@ Each browser keeps its own copy and shares links directly with other browsers.
 4. New users with a big gap download a snapshot from peers.
 5. Smart sync compares fingerprints and swaps whatever is still missing.
 6. New links go straight to connected peers.
+   Each link is signed with a key made in your browser.
+   Peers check the signature and drop links that are unsigned, changed,
+   posted under someone else's name, or sent faster than 10 a minute.
 7. In each cell, the first person links to the next cell in a ring,
    and the second adds a random shortcut, so every cell stays connected.
    Each browser keeps about 5 to 10 connections, however big the room gets.
@@ -102,7 +107,8 @@ tools/helper.mjs            Always-on helper
 - A link is only available while someone who has it is online
 - Peers can see each other's IP addresses
 - Some strict networks need a TURN server, which is not set up yet
-- Usernames and posts are not signed, so they can be faked
+- Your signing key lives in one browser, so a second device gets a different key
+- Someone can still make many new keys to get around the spam limit
 - There is no moderation yet
 - Only one tab per browser can save to the database
 
