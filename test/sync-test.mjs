@@ -382,6 +382,24 @@ export async function run({ setup } = {}) {
             if (await rowsFor(visitName) > 1) doubled = true;
             await new Promise((r) => setTimeout(r, 250));
         }
+        const quietCheck = await stay.evaluate(async (target) => {
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            const { renderPeerTable } = await import('/src/browser/ui/peerTable.js');
+            const entry = [...peerManager.profiles.values()].find((profile) => profile.username === target);
+            entry.lastSeen = Date.now() - 5 * 60 * 1000;
+            await renderPeerTable();
+            const row = () => [...document.querySelectorAll('#peer-table-body tr')]
+                .find((item) => item.children[1]?.textContent === target);
+            const stillShown = Boolean(row());
+            const markedIdle = row()?.children[5]?.textContent.includes('idle');
+            peerManager.checkAlive();
+            await new Promise((r) => setTimeout(r, 1500));
+            await renderPeerTable();
+            return { stillShown, markedIdle, answered: Date.now() - entry.lastSeen < 5000 && !row()?.children[5]?.textContent.includes('idle') };
+        }, visitName);
+        report('Quiet tabs stay in the bar', quietCheck.stillShown && quietCheck.markedIdle, JSON.stringify(quietCheck));
+        report('Tabs answer "are you there" right away', quietCheck.answered);
+
         report('A reload does not show someone twice', !doubled && await rowsFor(visitName) === 1,
             `online ${await onlineCount()}`);
 
@@ -617,6 +635,36 @@ export async function run({ setup } = {}) {
             localStorage.removeItem('webtorrent-dead-relays');
             return { skipsDead, comesBack, keepsEnough };
         });
+        const turnContext = await browser.newContext();
+        if (setup) await setup(turnContext);
+        await turnContext.route('https://turn.test/**', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ iceServers: [
+                { urls: ['stun:stun.cloudflare.com:3478'] },
+                { urls: ['turn:turn.test:3478?transport=udp', 'turn:turn.test:53?transport=udp', 'turns:turn.test:443?transport=tcp'],
+                    username: 'test-user', credential: 'test-pass' }
+            ] })
+        }));
+        await turnContext.route('https://turn-down.test/**', (route) => route.fulfill({ status: 502, body: 'down' }));
+        const turnPage = await turnContext.newPage();
+        await turnPage.goto(`${APP_URL}/?testRoom=${TEST_ROOM}-turn&turnEndpoint=https://turn.test/ice&turnOnly=1`);
+        await turnPage.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        const turnState = await turnPage.evaluate(async () => {
+            const { getRtcConfig, getTurnConfig, loadTurnConfig } = await import('/src/shared/networkConfig.js');
+            await new Promise((r) => setTimeout(r, 2500));
+            const servers = getTurnConfig();
+            const status = document.getElementById('peer-turn-status').textContent;
+            const relayOnly = getRtcConfig()?.iceTransportPolicy === 'relay';
+            const downStillWorks = await loadTurnConfig('https://turn-down.test/ice') === false && !getTurnConfig();
+            return { servers, status, relayOnly, downStillWorks };
+        });
+        const turnURLs = turnState.servers?.[0]?.urls || [];
+        report('TURN logins load from the worker', turnState.status === 'on' && turnState.servers?.length === 1
+            && turnURLs.length === 2 && !turnURLs.some((url) => url.includes(':53')), JSON.stringify(turnURLs));
+        report('TURN-only test mode works', turnState.relayOnly);
+        report('The app still works if TURN is down', turnState.downStillWorks);
+        await turnContext.close();
+
         report('Dead relays are skipped next time', relayChoice.skipsDead && relayChoice.comesBack && relayChoice.keepsEnough,
             JSON.stringify(relayChoice));
         await roomPage.close();

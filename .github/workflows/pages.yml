@@ -30,6 +30,7 @@ jobs:
       - run: npm run build
         env:
           PAGES_BASE: /webtorrent-db/
+          VITE_TURN_ENDPOINT: ${{ vars.TURN_ENDPOINT }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

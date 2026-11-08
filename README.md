@@ -74,7 +74,17 @@ Rooms: `general`, `movies`, `music`, `software`, `games`, and `books`.
 ## Network settings
 
 Copy `.env.example` to `.env.local` to add your own bootstrap relays or switch on TURN.
-TURN is off by default.
+
+### TURN
+
+Some networks, like many phones on mobile data, block direct connections.
+TURN passes the traffic through a relay server for those people only.
+It uses Cloudflare's TURN service, which is free for the first 1,000 GB a month.
+
+`tools/turn-worker` is a tiny Cloudflare Worker that keeps your secret TURN key
+and hands out logins that expire after a day. To switch TURN on for the live site,
+deploy the worker and save its address as the `TURN_ENDPOINT` repository variable.
+Open the site with `?turnOnly=1` to force every connection through TURN and check it works.
 
 To let other PCs use your bootstrap relay, run `npm run relay -- --public`
 behind a secure address. Browsers on https pages need `wss://` relays.

@@ -5,7 +5,7 @@ import { getAvatar } from '../../shared/profile.js';
 const ROWS_PER_PAGE = 13;
 const BAR_PROFILES = 4;
 const REFRESH_MS = 2000;
-const QUIET_MS = 30000;
+const IDLE_MS = 60000;
 let currentPage = 1;
 
 function makeAvatar(avatar, username) {
@@ -80,11 +80,12 @@ export async function renderPeerTable() {
     const myName = getUsername();
     const now = Date.now();
 
-    // One row per person: only peers who said who they are and are still talking.
+    // One row per connected person who said who they are.
     // After a reload someone has a new ID, so the newest connection wins.
+    // Nobody is hidden for being quiet. They leave when their connection closes.
     const byName = new Map();
     profiles
-        .filter(([, profile]) => profile.ready && now - profile.lastSeen < QUIET_MS)
+        .filter(([, profile]) => profile.ready)
         .filter(([, profile]) => profile.username !== myName)
         .forEach(([peerId, profile]) => {
             const current = byName.get(profile.username);
@@ -98,6 +99,8 @@ export async function renderPeerTable() {
     const theirs = profiles.reduce((total, [, profile]) => total + profile.connections, 0);
     document.getElementById('peer-room-name').textContent = getRoomLabel();
     document.getElementById('peer-relay-count').textContent = getRelayCount();
+    const { getTurnConfig } = await import('../../shared/networkConfig.js');
+    document.getElementById('peer-turn-status').textContent = getTurnConfig() ? 'on' : 'off';
     document.getElementById('peer-online-count').textContent = others.length + 1;
     document.getElementById('peer-direct-count').textContent = Math.round((mine + theirs) / 2);
 
@@ -117,7 +120,9 @@ export async function renderPeerTable() {
             peerId: peerId.slice(0, 8),
             connections: profile.connections,
             links: profile.links,
-            time: formatConnectedTime(profile.connectedAt)
+            time: now - profile.lastSeen > IDLE_MS
+                ? `${formatConnectedTime(profile.connectedAt)} idle`
+                : formatConnectedTime(profile.connectedAt)
         }))
     ];
 
@@ -164,4 +169,7 @@ export function initPeerTable() {
 
     renderPeerTable();
     setInterval(renderPeerTable, REFRESH_MS);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') renderPeerTable();
+    });
 }

@@ -1,0 +1,6 @@
+name = "webtorrent-turn"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://maddi115.github.io,http://localhost:3000,http://localhost:4173"

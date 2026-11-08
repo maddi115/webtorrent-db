@@ -6,7 +6,9 @@ import { getRelaySockets, joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';
 import { getTopic, setTopic } from '../../shared/rooms.js';
 import { recordShared } from '../../shared/shareStats.js';
-import { getRelayUrls, getTurnConfig, networkSettings, saveRelayHealth } from '../../shared/networkConfig.js';
+import {
+    getRelayUrls, getRtcConfig, getTurnConfig, loadTurnConfig, networkSettings, saveRelayHealth
+} from '../../shared/networkConfig.js';
 import { logger } from '../../shared/logger.js';
 
 const APP_ID = 'maddi115-webtorrent-p2p-db';
@@ -125,6 +127,8 @@ function openRoom(roomId) {
     const config = { appId: APP_ID, relayConfig: { urls: getRelayUrls() } };
     const turnConfig = getTurnConfig();
     if (turnConfig) config.turnConfig = turnConfig;
+    const rtcConfig = getRtcConfig();
+    if (rtcConfig) config.rtcConfig = rtcConfig;
 
     const room = joinRoom(config, roomId);
     const messages = room.makeAction('message');
@@ -453,4 +457,6 @@ window.addEventListener('pageshow', (event) => {
 peerManager.onMembersChanged = () => scheduleRebalance();
 peerManager.onNetworkInfo = learnNetwork;
 logger.info(`✅ My peer ID: ${selfId}`);
-start();
+loadTurnConfig().then((turnOn) => {
+    logger.info(`🧭 TURN: ${turnOn ? 'on' : 'off'}${getRtcConfig() ? ' (TURN only)' : ''}`);
+}).finally(start);

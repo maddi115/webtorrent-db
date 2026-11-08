@@ -26,8 +26,12 @@ class PeerManager {
         this.requested = new Set();
         this.onMembersChanged = () => {};
         this.onNetworkInfo = () => {};
-        // A small status message now and then shows who is still there
-        setInterval(() => this.sendStatus(), HEARTBEAT_MS);
+        // Ask who is still there. Background tabs slow their timers down,
+        // but they still answer messages right away, so a reply is reliable.
+        setInterval(() => this.checkAlive(), HEARTBEAT_MS);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') this.checkAlive();
+        });
     }
 
     resetRequests() {
@@ -93,6 +97,13 @@ class PeerManager {
         await this.sendStatus();
     }
 
+    checkAlive() {
+        if (!this.peers.size) return;
+        this.broadcast({ type: 'ping' });
+        this.sendStatus();
+        setTimeout(() => renderPeerTable(), 1000);
+    }
+
     async sendStatus() {
         if (!this.peers.size) return;
         const { getEntryCount } = await import('../storage/db.js');
@@ -106,7 +117,7 @@ class PeerManager {
     handlePeerData(data, connection) {
         const seen = this.profiles.get(connection.peer);
         if (seen) seen.lastSeen = Date.now();
-        if (data.type !== 'peer_status') logger.info(`🎯 Received data, type: ${data.type}`);
+        if (!['peer_status', 'ping', 'pong'].includes(data.type)) logger.info(`🎯 Received data, type: ${data.type}`);
 
         switch (data.type) {
             case 'handshake':
@@ -123,6 +134,13 @@ class PeerManager {
 
             case 'bye':
                 this.removePeer(connection.peer);
+                break;
+
+            case 'ping':
+                connection.send({ type: 'pong' });
+                break;
+
+            case 'pong':
                 break;
 
             case 'cells':

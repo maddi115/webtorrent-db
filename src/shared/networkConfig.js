@@ -62,16 +62,52 @@ export function getRelayUrls() {
     return [...new Set([...bootstrap, ...publicRelays])];
 }
 
-// TURN is off until these settings are filled in
-export function getTurnConfig() {
-    const urls = listFromEnv(import.meta.env.VITE_TURN_URLS);
-    if (!urls.length) return undefined;
+const TURN_TIMEOUT_MS = 3000;
+let turnServers = null;
 
-    return [{
-        urls,
-        username: import.meta.env.VITE_TURN_USERNAME,
-        credential: import.meta.env.VITE_TURN_CREDENTIAL
-    }];
+// Keeps only TURN entries a browser can use. Port 53 is blocked by browsers.
+export function cleanIceServers(list) {
+    if (!Array.isArray(list)) return [];
+    return list.flatMap((server) => {
+        const urls = (Array.isArray(server?.urls) ? server.urls : [server?.urls])
+            .filter((url) => typeof url === 'string' && /^turns?:/.test(url) && !/:53(\?|$)/.test(url));
+        if (!urls.length || typeof server.username !== 'string' || typeof server.credential !== 'string') return [];
+        return [{ urls, username: server.username, credential: server.credential }];
+    });
+}
+
+// TURN relays traffic for people whose network blocks direct connections.
+// Logins come from your TURN worker and last a day. Without one, TURN stays off.
+export async function loadTurnConfig(endpoint = import.meta.env.VITE_TURN_ENDPOINT || devOptions.get('turnEndpoint')) {
+    const fixedURLs = listFromEnv(import.meta.env.VITE_TURN_URLS);
+    if (fixedURLs.length) {
+        turnServers = cleanIceServers([{
+            urls: fixedURLs,
+            username: import.meta.env.VITE_TURN_USERNAME,
+            credential: import.meta.env.VITE_TURN_CREDENTIAL
+        }]);
+        return Boolean(turnServers.length);
+    }
+    if (!endpoint) return false;
+
+    try {
+        const response = await fetch(endpoint, { signal: AbortSignal.timeout(TURN_TIMEOUT_MS) });
+        if (!response.ok) throw new Error(`TURN worker answered ${response.status}`);
+        turnServers = cleanIceServers((await response.json()).iceServers);
+    } catch (error) {
+        console.warn('⚠️ TURN is unavailable, using direct connections only', error);
+        turnServers = null;
+    }
+    return Boolean(turnServers?.length);
+}
+
+export function getTurnConfig() {
+    return turnServers?.length ? turnServers : undefined;
+}
+
+// ?turnOnly=1 forces every connection through TURN, to check that it works
+export function getRtcConfig() {
+    return pageOptions.get('turnOnly') === '1' && getTurnConfig() ? { iceTransportPolicy: 'relay' } : undefined;
 }
 
 export const networkSettings = {
