@@ -4,6 +4,8 @@ import { getAvatar } from '../../shared/profile.js';
 
 const ROWS_PER_PAGE = 13;
 const BAR_PROFILES = 4;
+const REFRESH_MS = 2000;
+const QUIET_MS = 30000;
 let currentPage = 1;
 
 function makeAvatar(avatar, username) {
@@ -75,25 +77,41 @@ export async function renderPeerTable() {
     const { getMyPeerId, getRelayCount, getRoomLabel } = await import('../network/roomNetwork.js');
     const profiles = [...peerManager.profiles.entries()];
     const links = await getEntryCount().catch(() => 0);
+    const myName = getUsername();
+    const now = Date.now();
+
+    // One row per person: only peers who said who they are and are still talking.
+    // After a reload someone has a new ID, so the newest connection wins.
+    const byName = new Map();
+    profiles
+        .filter(([, profile]) => profile.ready && now - profile.lastSeen < QUIET_MS)
+        .filter(([, profile]) => profile.username !== myName)
+        .forEach(([peerId, profile]) => {
+            const current = byName.get(profile.username);
+            if (!current || profile.connectedAt > current[1].connectedAt) {
+                byName.set(profile.username, [peerId, profile]);
+            }
+        });
+    const others = [...byName.values()];
 
     const mine = peerManager.peers.size;
     const theirs = profiles.reduce((total, [, profile]) => total + profile.connections, 0);
     document.getElementById('peer-room-name').textContent = getRoomLabel();
     document.getElementById('peer-relay-count').textContent = getRelayCount();
-    document.getElementById('peer-online-count').textContent = profiles.length + 1;
+    document.getElementById('peer-online-count').textContent = others.length + 1;
     document.getElementById('peer-direct-count').textContent = Math.round((mine + theirs) / 2);
 
     const people = [
         {
             avatar: getAvatar(),
-            username: getUsername(),
+            username: myName,
             peerId: getMyPeerId().slice(0, 8),
             connections: mine,
             links,
             time: 'Now',
             isSelf: true
         },
-        ...profiles.map(([peerId, profile]) => ({
+        ...others.map(([peerId, profile]) => ({
             avatar: profile.avatar,
             username: profile.username,
             peerId: peerId.slice(0, 8),
@@ -145,5 +163,5 @@ export function initPeerTable() {
     });
 
     renderPeerTable();
-    setInterval(renderPeerTable, 5000);
+    setInterval(renderPeerTable, REFRESH_MS);
 }

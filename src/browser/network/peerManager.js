@@ -16,6 +16,7 @@ import { handleChunk, handleChunkRequest, handleLinkGap, handleOffer } from './s
 const MAX_SYNC_ITEMS = 5000;
 const MAX_WHO_HAS = 50;
 const REQUEST_RETRY_MS = 15000;
+const HEARTBEAT_MS = 10000;
 
 class PeerManager {
     constructor() {
@@ -25,6 +26,8 @@ class PeerManager {
         this.requested = new Set();
         this.onMembersChanged = () => {};
         this.onNetworkInfo = () => {};
+        // A small status message now and then shows who is still there
+        setInterval(() => this.sendStatus(), HEARTBEAT_MS);
     }
 
     resetRequests() {
@@ -50,6 +53,8 @@ class PeerManager {
             connections: 1,
             links: 0,
             connectedAt: Date.now(),
+            lastSeen: Date.now(),
+            ready: false,
             joinedAt: null,
             home: undefined,
             role: null
@@ -68,6 +73,7 @@ class PeerManager {
     }
 
     removePeer(peerId) {
+        if (!this.peers.has(peerId) && !this.profiles.has(peerId)) return;
         const username = presenceManager.getUserByPeerId(peerId);
         if (username) {
             presenceManager.setOffline(username);
@@ -84,7 +90,11 @@ class PeerManager {
     async statusChanged() {
         this.updatePeerCount();
         renderPeerTable();
+        await this.sendStatus();
+    }
 
+    async sendStatus() {
+        if (!this.peers.size) return;
         const { getEntryCount } = await import('../storage/db.js');
         this.broadcast({
             type: 'peer_status',
@@ -94,7 +104,9 @@ class PeerManager {
     }
 
     handlePeerData(data, connection) {
-        logger.info(`🎯 Received data, type: ${data.type}`);
+        const seen = this.profiles.get(connection.peer);
+        if (seen) seen.lastSeen = Date.now();
+        if (data.type !== 'peer_status') logger.info(`🎯 Received data, type: ${data.type}`);
 
         switch (data.type) {
             case 'handshake':
@@ -107,6 +119,10 @@ class PeerManager {
 
             case 'peer_status':
                 this.handlePeerStatus(data, connection);
+                break;
+
+            case 'bye':
+                this.removePeer(connection.peer);
                 break;
 
             case 'cells':
@@ -220,6 +236,7 @@ class PeerManager {
                 presenceManager.setOffline(profile.username);
             }
             profile.username = username;
+            profile.ready = true;
             presenceManager.setOnline(username, connection.peer);
         }
         profile.avatar = safeImage(data.avatar, MAX_AVATAR_CHARS);

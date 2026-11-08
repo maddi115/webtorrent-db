@@ -441,6 +441,15 @@ setInterval(checkRelays, 10 * RELAY_CHECK_MS);
 setInterval(rejoinIfAlone, aloneMs);
 setInterval(() => scheduleRebalance(), 5000);
 
+// Say goodbye when the page closes, so others drop you right away
+window.addEventListener('pagehide', () => {
+    peerManager.broadcast({ type: 'bye' });
+    closeAllRooms();
+});
+window.addEventListener('pageshow', (event) => {
+    if (event.persisted) start();
+});
+
 peerManager.onMembersChanged = () => scheduleRebalance();
 peerManager.onNetworkInfo = learnNetwork;
 logger.info(`✅ My peer ID: ${selfId}`);

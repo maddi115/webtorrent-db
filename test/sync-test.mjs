@@ -46,12 +46,19 @@ function portOpen(port) {
 
 async function ensureServer(port, command, args, cwd) {
     if (await portOpen(port)) return;
-    children.push(spawn(command, args, { cwd, stdio: 'ignore', shell: process.platform === 'win32' }));
-    for (let i = 0; i < 40; i++) {
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    const keep = (data) => { output = (output + data).slice(-2000); };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    children.push(child);
+    for (let i = 0; i < 120; i++) {
         if (await portOpen(port)) return;
+        if (child.exitCode !== null) break;
         await new Promise((r) => setTimeout(r, 250));
     }
-    throw new Error(`Server on port ${port} did not start`);
+    child.kill();
+    throw new Error(`Server on port ${port} did not start. Its output was:\n${output || '(nothing)'}`);
 }
 
 async function openPeer(browser, name, setup, options = `testRoom=${TEST_ROOM}`) {
@@ -313,7 +320,8 @@ export async function run({ setup } = {}) {
             const { renderPeerTable } = await import('/src/browser/ui/peerTable.js');
             for (let i = 0; i < 20; i++) {
                 peerManager.profiles.set(`fake-peer-${i}`, {
-                    username: `Fake User ${i}`, avatar: null, connections: 1, links: 0, connectedAt: Date.now()
+                    username: `Fake User ${i}`, avatar: null, connections: 1, links: 0, connectedAt: Date.now(),
+                    lastSeen: Date.now(), ready: true
                 });
             }
             await renderPeerTable();
@@ -347,6 +355,42 @@ export async function run({ setup } = {}) {
         report('Pagination shows the next users', pageTwo);
         await c.click('#peer-close');
         report('Late joiner receives existing links', !!(await hasLink(c, u1)));
+        await c.evaluate(async () => {
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            for (let i = 0; i < 20; i++) peerManager.profiles.delete(`fake-peer-${i}`);
+        });
+
+        const presenceOptions = `testRoom=${TEST_ROOM}-presence`;
+        const stay = await openPeer(browser, 'Stay', setup, presenceOptions);
+        const visit = await openPeer(browser, 'Visit', setup, presenceOptions);
+        await Promise.all([waitForPeers(stay, 1), waitForPeers(visit, 1)]);
+        const visitName = await visit.textContent('#username-display');
+        const rowsFor = (name) => stay.evaluate((target) => [...document.querySelectorAll('#peer-table-body tr')]
+            .filter((row) => row.children[1]?.textContent === target).length, name);
+        const onlineCount = () => stay.evaluate(() => document.getElementById('peer-online-count').textContent);
+        const shownOnce = await stay.waitForFunction(async (target) => (
+            [...document.querySelectorAll('#peer-table-body tr')]
+                .filter((row) => row.children[1]?.textContent === target).length === 1
+        ), visitName, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('New people show in the bar', shownOnce);
+
+        await visit.reload();
+        await visit.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        const reloadStart = Date.now();
+        let doubled = false;
+        while (Date.now() - reloadStart < 8000) {
+            if (await rowsFor(visitName) > 1) doubled = true;
+            await new Promise((r) => setTimeout(r, 250));
+        }
+        report('A reload does not show someone twice', !doubled && await rowsFor(visitName) === 1,
+            `online ${await onlineCount()}`);
+
+        await visit.close();
+        const leftQuickly = await stay.waitForFunction(
+            () => document.getElementById('peer-online-count').textContent === '1',
+            null, { timeout: 5000 }).then(() => true).catch(() => false);
+        report('People who leave disappear right away', leftQuickly);
+        await stay.close();
 
         const splitOptions = `testRoom=${TEST_ROOM}-split&capacity=2`;
         const d = await openPeer(browser, 'D', setup, splitOptions);
