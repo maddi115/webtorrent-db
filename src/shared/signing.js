@@ -131,6 +131,28 @@ export function isEntryId(value) {
     return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
 }
 
+// The exact text a chat message's signature covers
+export function getChatText(message) {
+    return ['wtdb-chat-1', message.room, message.name, message.time, message.text, message.key].join('\n');
+}
+
+export async function signChat(message, keys) {
+    const signer = keys || await getMyKeys();
+    message.key = signer.publicKey;
+    const signature = await crypto.subtle.sign('Ed25519', signer.privateKey, encoder.encode(getChatText(message)));
+    message.sig = toBase64Url(signature);
+    const hash = await crypto.subtle.digest('SHA-256', encoder.encode(getChatText(message)));
+    message.id = Array.from(new Uint8Array(hash).slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return message;
+}
+
+export async function verifyChat(message) {
+    if (!await verifyText(message.key, message.sig, getChatText(message))) return false;
+    const hash = await crypto.subtle.digest('SHA-256', encoder.encode(getChatText(message)));
+    const id = Array.from(new Uint8Array(hash).slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return id === message.id;
+}
+
 export function verifyDelete(note) {
     if (!isEntryId(note?.entryId)) return Promise.resolve(false);
     return verifyText(note.authorKey, note.signature, getDeleteText(note.entryId));

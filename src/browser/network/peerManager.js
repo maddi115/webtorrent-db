@@ -13,6 +13,7 @@ import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
 import { handleFingerprints, handleLists, startSync } from './smartSync.js';
 import { receiveDeletes } from './deletes.js';
 import { forgetMember, receiveHere } from './roomPresence.js';
+import { receiveChat, receiveHistory, sendHistory } from './chat.js';
 import { handleChunk, handleChunkRequest, handleLinkGap, handleOffer } from './snapshotManager.js';
 
 const MAX_SYNC_ITEMS = 5000;
@@ -41,11 +42,14 @@ class PeerManager {
     }
 
     forwardEntry(entry, sourcePeerId) {
+        this.forwardMessage({ type: 'entry', entry }, sourcePeerId);
+    }
+
+    // Passes a message on to the other cells this browser is linked to
+    forwardMessage(message, sourcePeerId) {
         const sourceRoom = this.peers.get(sourcePeerId)?.room;
         this.peers.forEach((connection) => {
-            if (connection.room !== sourceRoom) {
-                connection.send({ type: 'entry', entry });
-            }
+            if (connection.room !== sourceRoom) connection.send(message);
         });
     }
 
@@ -151,6 +155,14 @@ class PeerManager {
                 receiveDeletes(data.deletes, connection.peer);
                 break;
 
+            case 'chat':
+                receiveChat(data.message, connection.peer);
+                break;
+
+            case 'chat_history':
+                receiveHistory(data.messages);
+                break;
+
             case 'pong':
                 break;
 
@@ -233,6 +245,7 @@ class PeerManager {
         profile.ring = Number.isSafeInteger(data.ring) ? data.ring : null;
         this.onNetworkInfo(data);
         this.handleProfile(data, connection);
+        sendHistory(connection);
         this.onMembersChanged();
         this.chooseSync(data, connection);
     }

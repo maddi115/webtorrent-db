@@ -351,6 +351,12 @@ const methods = {
 
     receiveEntries,
 
+    claimName(name, key) {
+        if (!name || !key) return false;
+        db.exec({ sql: 'INSERT OR IGNORE INTO authors (name, author_key) VALUES (?, ?)', bind: [name, key] });
+        return nameOwner(name) === key;
+    },
+
     applyDeletes,
 
     getUnsignedEntries() {

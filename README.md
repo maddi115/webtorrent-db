@@ -17,6 +17,8 @@ Each browser keeps its own copy and shares links directly with other browsers.
 - Tiny ThumbHash previews, with images loaded only when needed
 - Profile pictures and custom usernames of up to 5 letters
 - Signed posts, so nobody can fake your name or change your links
+- One global chat for everyone in every room. It keeps only the newest 25 messages,
+  blocks links, and shows messages as plain text only
 - A spam limit of 10 links a minute per person
 - A live table showing who is online
 - Sharing stats and a seeding switch

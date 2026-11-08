@@ -191,6 +191,11 @@ export async function saveOwnEntry(entry) {
     return status;
 }
 
+// Returns true if this key may use the name. The first key to use a name keeps it.
+export function claimName(name, key) {
+    return ready('claimName', name, key);
+}
+
 export function receiveEntries(entries) {
     return ready('receiveEntries', getTopic(), entries);
 }

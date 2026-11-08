@@ -103,6 +103,25 @@
         </form>
     </div>
 
+    <button id="chat-toggle" class="chat-toggle" type="button" aria-haspopup="dialog" aria-controls="chat-panel" aria-expanded="false">
+        💬 Chat <span id="chat-unread" class="chat-unread" hidden>0</span>
+    </button>
+
+    <section id="chat-panel" class="chat-panel" aria-label="Global chat" hidden>
+        <header class="chat-header">
+            <span>Global chat</span>
+            <span class="chat-note">Last 25 messages</span>
+            <button id="chat-close" class="chat-close" type="button" aria-label="Close chat">&times;</button>
+        </header>
+        <ol id="chat-list" class="chat-list" aria-live="polite"></ol>
+        <p id="chat-empty" class="chat-empty">No messages yet. Say hi 👋</p>
+        <form id="chat-form" class="chat-form">
+            <input id="chat-input" type="text" maxlength="300" autocomplete="off" placeholder="Type a message (no links)" aria-label="Message">
+            <button type="submit">Send</button>
+        </form>
+        <p id="chat-error" class="chat-error" hidden></p>
+    </section>
+
     <button id="peer-bar" class="peer-bar" type="button" aria-haspopup="dialog" aria-controls="peer-modal" aria-expanded="false">
         <span id="peer-bar-avatars" class="peer-bar-avatars"></span>
         <span id="peer-bar-count">1 online</span>

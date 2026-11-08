@@ -372,8 +372,127 @@ export async function run({ setup } = {}) {
         await a.fill('#search-input', '');
         await b.fill('#search-input', '');
 
+        const chatText = `hello <b>bold?</b> ${ID}`;
+        await a.click('#chat-toggle');
+        await a.fill('#chat-input', chatText);
+        await a.click('#chat-form button[type="submit"]');
+        await b.click('#chat-toggle');
+        const chatShown = await b.waitForFunction((text) => [...document.querySelectorAll('#chat-list .chat-text')]
+            .some((item) => item.textContent === text), chatText, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Chat messages reach the other browser', chatShown);
+        report('Chat messages stay plain text', await b.evaluate(() => !document.querySelector('#chat-list b')));
+
+        const chatChecks = await b.evaluate(async ({ takenName, stamp }) => {
+            const { getMessages, receiveChat, receiveHistory } = await import('/src/browser/network/chat.js');
+            const { importSigningKey, signChat, toBase64Url } = await import('/src/shared/signing.js');
+            const makeKeys = async () => {
+                const pair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+                return importSigningKey(
+                    toBase64Url(await crypto.subtle.exportKey('pkcs8', pair.privateKey)),
+                    toBase64Url(await crypto.subtle.exportKey('raw', pair.publicKey))
+                );
+            };
+            const has = (text) => getMessages().some((message) => message.text === text);
+            const base = Date.now() - 60000;
+
+            const honest = await signChat({ room: 'global', name: `Tester${stamp}`, time: Date.now(), text: `real ${stamp}` }, await makeKeys());
+            await receiveChat({ ...honest, text: `changed ${stamp}` }, 'test-peer');
+            const changedKept = has(`changed ${stamp}`);
+
+            const stolen = await signChat({ room: 'global', name: takenName, time: Date.now(), text: `stolen ${stamp}` }, await makeKeys());
+            await receiveChat(stolen, 'test-peer');
+            const stolenKept = has(`stolen ${stamp}`);
+
+            const linked = await signChat({ room: 'global', name: `Link${stamp}`, time: Date.now(), text: `see example.com ${stamp}` }, await makeKeys());
+            await receiveChat(linked, 'test-peer');
+            const linkKept = has(`see example.com ${stamp}`);
+
+            const spammer = await makeKeys();
+            let spamKept = 0;
+            for (let index = 0; index < 15; index++) {
+                const spam = await signChat({ room: 'global', name: `ChatSpam${stamp}`, time: Date.now(), text: `spam ${index} ${stamp}` }, spammer);
+                await receiveChat(spam, 'test-peer');
+                if (has(`spam ${index} ${stamp}`)) spamKept += 1;
+            }
+
+            const many = [];
+            for (let index = 0; index < 30; index++) {
+                many.push(await signChat({ room: 'global', name: `Many${index}x${stamp}`, time: base + 10000 + index * 1000, text: `many ${index} ${stamp}` }, await makeKeys()));
+            }
+            await receiveHistory(many);
+            await new Promise((r) => setTimeout(r, 300));
+            const kept = getMessages();
+            return {
+                changedKept, stolenKept, linkKept, spamKept,
+                count: kept.length,
+                newestKept: has(`many 29 ${stamp}`),
+                oldestGone: !has(`many 0 ${stamp}`),
+                shown: document.querySelectorAll('#chat-list .chat-message').length
+            };
+        }, { takenName: await a.textContent('#username-display'), stamp: ID });
+        report('Changed chat messages are rejected', !chatChecks.changedKept);
+        report('Nobody can chat under a taken name', !chatChecks.stolenKept);
+        report('Links from other people are dropped', !chatChecks.linkKept);
+        report('Chat spam is capped', chatChecks.spamKept === 10, `${chatChecks.spamKept} of 15 kept`);
+        report('Only the newest 25 messages are kept', chatChecks.count === 25 && chatChecks.newestKept && chatChecks.oldestGone
+            && chatChecks.shown <= 25, JSON.stringify(chatChecks));
+        const linkBlocked = await a.evaluate(async () => {
+            const { sendChat, hasLink } = await import('/src/browser/network/chat.js');
+            const tries = ['go to https://x.test', 'www.example', 'example.com/page', 'magnet:?xt=urn:btih:abc',
+                'visit 192.168.1.1', 'site\u200B.com', 'ｅｘａｍｐｌｅ．ｃｏｍ'];
+            const results = await Promise.all(tries.map((text) => sendChat(text)));
+            return {
+                allBlocked: results.every((result) => result.reason === 'link'),
+                normalTextOk: !hasLink('see you at 5.30, the coliseum was great!')
+            };
+        });
+        const floodChecks = await b.evaluate(async (stamp) => {
+            const { receiveChat, chatStats } = await import('/src/browser/network/chat.js');
+            const { importSigningKey, signChat, toBase64Url } = await import('/src/shared/signing.js');
+            await new Promise((r) => setTimeout(r, 10500));
+            const before = chatStats.rejected.busy || 0;
+            for (let index = 0; index < 50; index++) {
+                const pair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+                const keys = await importSigningKey(
+                    toBase64Url(await crypto.subtle.exportKey('pkcs8', pair.privateKey)),
+                    toBase64Url(await crypto.subtle.exportKey('raw', pair.publicKey))
+                );
+                await receiveChat(await signChat({ room: 'global', name: `Flood${index}x${stamp}`, time: Date.now(), text: `flood ${index}` }, keys), 'test-peer');
+            }
+            return (chatStats.rejected.busy || 0) - before;
+        }, ID);
+        report('A flood of new keys is capped too', floodChecks >= 10, `${floodChecks} of 50 dropped`);
+        report('Links cannot be sent in chat', linkBlocked.allBlocked && linkBlocked.normalTextOk, JSON.stringify(linkBlocked));
+
+        const otherRoomPage = await openPeer(browser, 'ChatMusic', setup, `testRoom=${TEST_ROOM}&room=music`);
+        const globalText = `global hello ${ID}`;
+        await a.evaluate(async (text) => {
+            const { sendChat } = await import('/src/browser/network/chat.js');
+            await new Promise((r) => setTimeout(r, 2000));
+            await sendChat(text);
+        }, globalText);
+        const reachedOtherRoom = await otherRoomPage.waitForFunction(async (text) => {
+            const { getMessages } = await import('/src/browser/network/chat.js');
+            return getMessages().some((message) => message.text === text);
+        }, globalText, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Chat reaches people in other rooms', reachedOtherRoom);
+        report('The chat uses no innerHTML', await otherRoomPage.evaluate(async () => {
+            const code = await (await fetch('/src/browser/ui/chatPanel.js')).text()
+                + await (await fetch('/src/browser/network/chat.js')).text();
+            return !/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(code);
+        }));
+        await otherRoomPage.close();
+
+        await a.click('#chat-close');
+        await b.click('#chat-close');
+
         const c = await openPeer(browser, 'C', setup);
         await waitForPeers(c, 2);
+        const historyArrived = await c.waitForFunction(async () => {
+            const { getMessages } = await import('/src/browser/network/chat.js');
+            return getMessages().length === 25;
+        }, null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('New people get the last 25 messages', historyArrived);
         const tableShown = await c.waitForFunction(() => {
             const rows = document.querySelectorAll('#peer-table-body tr').length;
             const online = document.getElementById('peer-online-count').textContent;
@@ -690,6 +809,17 @@ export async function run({ setup } = {}) {
         const reached = await Promise.all(mesh.map((page) => hasLink(page, meshURL)));
         const reachedCount = reached.filter(Boolean).length;
         report('Links hop across every cell', reachedCount === mesh.length, `${reachedCount} of ${mesh.length}`);
+        const meshChat = `mesh chat ${ID}`;
+        await mesh[0].evaluate(async (text) => {
+            const { sendChat } = await import('/src/browser/network/chat.js');
+            await sendChat(text);
+        }, meshChat);
+        const chatReached = await Promise.all(mesh.map((page) => page.waitForFunction(async (text) => {
+            const { getMessages } = await import('/src/browser/network/chat.js');
+            return getMessages().some((message) => message.text === text);
+        }, meshChat, { timeout: WAIT_MS }).then(() => true).catch(() => false)));
+        const chatCount = chatReached.filter(Boolean).length;
+        report('Chat hops across every cell', chatCount === mesh.length, `${chatCount} of ${mesh.length}`);
         await Promise.all(mesh.map((page) => page.close()));
         await relay.close();
 
