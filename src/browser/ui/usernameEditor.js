@@ -6,12 +6,14 @@ import { getAvatar } from '../../shared/profile.js';
 import { getUsername, isValidName, setUsername } from '../../shared/username.js';
 import { renderPeerTable } from './peerTable.js';
 import { refreshResults } from './search.js';
+import { showProfile } from './profile.js';
 
 async function saveName(name) {
     const username = setUsername(name);
     const avatar = getAvatar();
 
     document.getElementById('username-display').textContent = username;
+    showProfile();
     presenceManager.rename(username);
     peerManager.broadcast({ type: 'profile', username, avatar });
     if (avatar) await saveAvatar(username, avatar);
@@ -21,7 +23,7 @@ async function saveName(name) {
 }
 
 export function initUsernameEditor() {
-    const button = document.getElementById('username-display');
+    const button = document.getElementById('profile-card');
     const modal = document.getElementById('name-modal');
     const form = document.getElementById('name-form');
     const input = document.getElementById('name-input');
@@ -35,6 +37,7 @@ export function initUsernameEditor() {
     button.addEventListener('click', () => {
         input.value = '';
         error.hidden = true;
+        document.getElementById('name-current').textContent = getUsername();
         modal.hidden = false;
         input.focus();
     });
@@ -53,6 +56,11 @@ export function initUsernameEditor() {
         event.preventDefault();
         const name = input.value.trim();
 
+        // Only the photo changed, so there is no name to save
+        if (!name) {
+            close();
+            return;
+        }
         if (!isValidName(name)) {
             error.hidden = false;
             input.focus();
@@ -63,5 +71,5 @@ export function initUsernameEditor() {
         close();
     });
 
-    button.title = `Change username: ${getUsername()}`;
+
 }

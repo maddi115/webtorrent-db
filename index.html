@@ -32,12 +32,17 @@
                 
                 <div class="search-actions">
                     <button id="add-entry-btn">+ Add Entry</button>
-                    <button id="profile-btn" class="profile-btn" type="button" aria-label="Change profile picture" title="Change profile picture">
-                        <span>👤</span>
-                        <img id="profile-image" alt="">
+                    <button id="profile-card" class="profile-card" type="button" aria-haspopup="dialog" title="Change your photo and username">
+                        <span class="profile-photo">
+                            <span id="profile-initial" class="profile-initial" aria-hidden="true">?</span>
+                            <img id="profile-image" alt="">
+                        </span>
+                        <span class="profile-card-text">
+                            <span id="username-display" class="profile-name"></span>
+                            <span id="profile-card-hint" class="profile-card-hint">✏️ Edit profile</span>
+                        </span>
                     </button>
                     <input id="profile-upload" type="file" accept="image/*" hidden>
-                    <button id="username-display" class="username username-button" type="button"></button>
                 </div>
             </div>
             
@@ -68,13 +73,27 @@
     </div>
 
     <div id="name-modal" class="name-modal" hidden>
-        <form id="name-form" class="name-panel" aria-label="Change username">
-            <label for="name-input">Choose your username</label>
-            <input id="name-input" type="text" maxlength="5" autocomplete="off" spellcheck="false" placeholder="Up to 5 letters">
+        <form id="name-form" class="name-panel" aria-label="Your profile">
+            <h2 class="name-title">Your profile</h2>
+
+            <div class="profile-photo-row">
+                <span class="profile-photo profile-photo-large">
+                    <span id="profile-preview-initial" class="profile-initial" aria-hidden="true">?</span>
+                    <img id="profile-preview" alt="Your profile photo">
+                </span>
+                <div class="profile-photo-side">
+                    <button id="profile-btn" class="profile-photo-button" type="button">📷 Change photo</button>
+                    <p class="profile-hint">Shows next to your posts and in the online list.</p>
+                </div>
+            </div>
+
+            <label for="name-input">Username</label>
+            <p class="profile-hint">Now: <strong id="name-current"></strong></p>
+            <input id="name-input" type="text" maxlength="5" autocomplete="off" spellcheck="false" placeholder="New name, up to 5 letters">
             <p id="name-error" class="name-error" hidden>Use 1 to 5 letters, A to Z.</p>
             <div class="name-actions">
-                <button id="name-cancel" type="button">Cancel</button>
-                <button type="submit">Save</button>
+                <button id="name-cancel" type="button">Close</button>
+                <button type="submit" class="name-save">Save</button>
             </div>
         </form>
     </div>

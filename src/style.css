@@ -405,7 +405,139 @@ footer span {
   }
 }
 
-/* Profile picture */
+/* Your profile: photo, name, and a clear edit label in one button */
+.profile-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 230px;
+  padding: 4px 12px 4px 4px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--search-bg));
+  color: hsl(var(--foreground));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.profile-card:hover,
+.profile-card:focus-visible {
+  border-color: hsl(var(--tag-purple));
+  box-shadow: 0 0 0 3px hsl(var(--tag-purple) / 0.15);
+  outline: none;
+}
+
+.profile-card.needs-setup {
+  border-color: hsl(var(--tag-purple) / 0.6);
+  box-shadow: 0 0 0 3px hsl(var(--tag-purple) / 0.12);
+}
+
+.profile-photo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: hsl(var(--tag-purple));
+  color: #fff;
+  font-weight: 600;
+}
+
+.profile-photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-photo img[hidden],
+.profile-initial[hidden] {
+  display: none;
+}
+
+.profile-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.profile-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-card-hint {
+  color: hsl(var(--tag-purple));
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.name-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.profile-photo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #333;
+}
+
+.profile-photo-large {
+  width: 64px;
+  height: 64px;
+  font-size: 24px;
+}
+
+.profile-photo-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-photo-button {
+  align-self: flex-start;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #1a1a1a;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.profile-photo-button:hover {
+  border-color: #aaa;
+}
+
+.profile-hint {
+  margin: 0;
+  color: #aaa;
+  font-size: 12px;
+}
+
+.name-actions .name-save {
+  border-color: #fff;
+  background: #fff;
+  color: #000;
+}
+
+/* Old profile picture button */
 .profile-btn {
   width: 36px;
   height: 36px;

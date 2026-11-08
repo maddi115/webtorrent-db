@@ -793,6 +793,13 @@ export async function run({ setup } = {}) {
             return panel.getBoundingClientRect().width === 720 && scroll.scrollWidth <= scroll.clientWidth;
         }));
 
+        const cardText = await tablePage.textContent('#profile-card');
+        report('Profile button says how to edit it', cardText.includes('Set your name') || cardText.includes('Edit profile'), cardText.trim().replace(/\s+/g, ' '));
+        await tablePage.click('#profile-card');
+        report('Profile window shows your name and photo button', await tablePage.isVisible('#name-modal')
+            && await tablePage.textContent('#name-current') === await tablePage.textContent('#username-display')
+            && await tablePage.isVisible('#profile-btn'));
+        await tablePage.click('#name-cancel');
         await tablePage.click('#username-display');
         await tablePage.fill('#name-input', 'Ab1');
         await tablePage.click('#name-form button[type="submit"]');

@@ -6,21 +6,36 @@ import { getUsername } from '../../shared/username.js';
 import { renderPeerTable } from './peerTable.js';
 import { refreshResults } from './search.js';
 
-function showAvatar() {
-    const image = document.getElementById('profile-image');
+// Shows your photo, or the first letter of your name, in the header and the profile window
+export function showProfile() {
     const avatar = getAvatar();
+    const initial = (getUsername() || '?').charAt(0).toUpperCase();
+    const isDefaultName = /^User\d+#/.test(getUsername());
 
-    if (avatar) {
-        image.src = avatar;
-        image.style.display = 'block';
-    }
+    [['profile-image', 'profile-initial'], ['profile-preview', 'profile-preview-initial']].forEach(([imageId, initialId]) => {
+        const image = document.getElementById(imageId);
+        const letter = document.getElementById(initialId);
+        if (!image || !letter) return;
+
+        letter.textContent = initial;
+        if (avatar) image.src = avatar;
+        image.hidden = !avatar;
+        letter.hidden = Boolean(avatar);
+    });
+
+    // A gentle nudge until someone picks their own name or photo
+    const card = document.getElementById('profile-card');
+    const needsSetup = isDefaultName || !avatar;
+    card?.classList.toggle('needs-setup', needsSetup);
+    const hint = document.getElementById('profile-card-hint');
+    if (hint) hint.textContent = needsSetup ? '✏️ Set your name & photo' : '✏️ Edit profile';
 }
 
 export function initProfile() {
     const button = document.getElementById('profile-btn');
     const input = document.getElementById('profile-upload');
 
-    showAvatar();
+    showProfile();
     if (getAvatar()) saveAvatar(getUsername(), getAvatar());
     button.addEventListener('click', () => input.click());
 
@@ -29,7 +44,7 @@ export function initProfile() {
 
         const avatar = await resizeImage(input.files[0], 96, 0.8);
         setAvatar(avatar);
-        showAvatar();
+        showProfile();
         input.value = '';
 
         const { peerManager } = await import('../network/peerManager.js');
