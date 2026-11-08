@@ -6,7 +6,7 @@ import { getRelaySockets, joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';
 import { getTopic, setTopic } from '../../shared/rooms.js';
 import { recordShared } from '../../shared/shareStats.js';
-import { getRelayUrls, getTurnConfig, networkSettings } from '../../shared/networkConfig.js';
+import { getRelayUrls, getTurnConfig, networkSettings, saveRelayHealth } from '../../shared/networkConfig.js';
 import { logger } from '../../shared/logger.js';
 
 const APP_ID = 'maddi115-webtorrent-p2p-db';
@@ -424,6 +424,19 @@ function start() {
 export function getMyPeerId() {
     return selfId;
 }
+
+// After a short wait, note which relays answered, so dead ones are skipped next time
+const RELAY_CHECK_MS = 20000;
+function checkRelays() {
+    const sockets = Object.entries(getRelaySockets());
+    const working = sockets.filter(([, socket]) => socket.readyState === 1).map(([url]) => url);
+    const failed = sockets.filter(([, socket]) => socket.readyState !== 1).map(([url]) => url);
+    saveRelayHealth(working, failed);
+    logger.info(`📡 Relays working: ${working.length} of ${sockets.length}`
+        + (failed.length ? ` (not answering: ${failed.map((url) => url.replace('wss://', '')).join(', ')})` : ''));
+}
+setTimeout(checkRelays, RELAY_CHECK_MS);
+setInterval(checkRelays, 10 * RELAY_CHECK_MS);
 
 setInterval(rejoinIfAlone, aloneMs);
 setInterval(() => scheduleRebalance(), 5000);

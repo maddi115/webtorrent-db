@@ -562,6 +562,19 @@ export async function run({ setup } = {}) {
 
         const roomPage = await openPeer(browser, 'RoomLink', setup, `testRoom=${TEST_ROOM}-link&room=music`);
         report('Room links open the right topic', await roomPage.inputValue('#room-select') === 'music');
+        const relayChoice = await roomPage.evaluate(async () => {
+            const { PUBLIC_RELAYS, getPublicRelays, saveRelayHealth } = await import('/src/shared/networkConfig.js');
+            saveRelayHealth([], ['wss://relay.damus.io']);
+            const skipsDead = !getPublicRelays().includes('wss://relay.damus.io');
+            saveRelayHealth(['wss://relay.damus.io'], []);
+            const comesBack = getPublicRelays().includes('wss://relay.damus.io');
+            saveRelayHealth([], PUBLIC_RELAYS);
+            const keepsEnough = getPublicRelays().length === PUBLIC_RELAYS.length;
+            localStorage.removeItem('webtorrent-dead-relays');
+            return { skipsDead, comesBack, keepsEnough };
+        });
+        report('Dead relays are skipped next time', relayChoice.skipsDead && relayChoice.comesBack && relayChoice.keepsEnough,
+            JSON.stringify(relayChoice));
         await roomPage.close();
 
         const helperOptions = `&testRoom=${TEST_ROOM}-helper`;
