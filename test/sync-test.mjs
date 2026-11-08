@@ -449,6 +449,10 @@ export async function run({ setup } = {}) {
             if (await rowsFor(visitName) > 1) doubled = true;
             await new Promise((r) => setTimeout(r, 250));
         }
+        await stay.waitForFunction(async (target) => {
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            return [...peerManager.profiles.values()].some((profile) => profile.username === target && profile.ready);
+        }, visitName, { timeout: WAIT_MS });
         const quietCheck = await stay.evaluate(async (target) => {
             const { peerManager } = await import('/src/browser/network/peerManager.js');
             const { renderPeerTable } = await import('/src/browser/ui/peerTable.js');
@@ -484,7 +488,7 @@ export async function run({ setup } = {}) {
         const f = await openPeer(browser, 'F', setup, splitOptions);
         const roomText = (page) => page.evaluate(() => document.getElementById('peer-room-name').textContent);
         const moved = await f.waitForFunction(
-            () => document.getElementById('peer-room-name').textContent.startsWith('general 2'),
+            () => document.getElementById('peer-room-name').textContent.startsWith('Room 1 · group 2'),
             null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
         report('Full room splits automatically', moved, await roomText(f));
 
@@ -691,6 +695,49 @@ export async function run({ setup } = {}) {
 
         const roomPage = await openPeer(browser, 'RoomLink', setup, `testRoom=${TEST_ROOM}-link&room=music`);
         report('Room links open the right topic', await roomPage.inputValue('#room-select') === 'music');
+        const roomNames = await roomPage.evaluate(() => [...document.querySelectorAll('#room-select option')]
+            .map((option) => option.textContent));
+        report('Rooms are named Room 1 to Room 6', roomNames.length === 6
+            && roomNames.every((name, index) => name.startsWith(`Room ${index + 1}`))
+            && roomNames[2].endsWith('(1/50)'), roomNames.join(', '));
+        report('The page explains rooms', (await roomPage.textContent('.room-note')).includes('up to 50 people'));
+        const numberLink = await openPeer(browser, 'NumberLink', setup, `testRoom=${TEST_ROOM}-link&room=5`);
+        report('Room number links work', await numberLink.inputValue('#room-select') === 'games');
+        await numberLink.close();
+
+        const fullOptions = `testRoom=${TEST_ROOM}-full&roomMax=2&roomSettleMs=3000&hereMs=1500`;
+        const first = await openPeer(browser, 'Full1', setup, fullOptions);
+        const second = await openPeer(browser, 'Full2', setup, fullOptions);
+        await Promise.all([waitForPeers(first, 1), waitForPeers(second, 1)]);
+        await new Promise((r) => setTimeout(r, 1500));
+        const third = await openPeer(browser, 'Full3', setup, fullOptions);
+        const roomCount = (page) => page.evaluate(async () => {
+            const { getRoomCount } = await import('/src/browser/network/roomPresence.js');
+            return getRoomCount();
+        });
+        const countedFull = await first.waitForFunction(async () => {
+            const { getRoomCount } = await import('/src/browser/network/roomPresence.js');
+            return getRoomCount() === 3;
+        }, null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        report('Everyone in a room is counted', countedFull);
+        const thirdMoved = await third.waitForFunction(
+            () => document.getElementById('room-select').value === 'movies',
+            null, { timeout: WAIT_MS }).then(() => true).catch(() => false);
+        const toldWhy = thirdMoved && await third.evaluate(() => [...document.querySelectorAll('.room-toast')]
+            .some((toast) => toast.textContent.includes('Room 1 is full')));
+        report('The newest person moves when a room is full', thirdMoved
+            && await first.inputValue('#room-select') === 'general'
+            && await second.inputValue('#room-select') === 'general');
+        report('They are told why they moved', toldWhy);
+        const settledCounts = await first.waitForFunction(async () => {
+            const { getRoomCount } = await import('/src/browser/network/roomPresence.js');
+            return getRoomCount() === 2;
+        }, null, { timeout: 3000 }).then(() => true).catch(() => false);
+        await new Promise((r) => setTimeout(r, 3000));
+        const stillTwo = await roomCount(first) === 2 && await roomCount(second) === 2;
+        report('Room counts go down right away when people leave', settledCounts && stillTwo,
+            `${await roomCount(first)} in Room 1`);
+        await Promise.all([first.close(), second.close(), third.close()]);
         const relayChoice = await roomPage.evaluate(async () => {
             const { PUBLIC_RELAYS, getPublicRelays, saveRelayHealth } = await import('/src/shared/networkConfig.js');
             saveRelayHealth([], ['wss://relay.damus.io']);

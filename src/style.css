@@ -837,6 +837,19 @@ input {
   }
 }
 
+.room-note {
+  max-width: 560px;
+  margin: 0 auto 16px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.room-toast {
+  max-width: 360px;
+}
+
 /* Second tab warning */
 .storage-warning {
   margin-bottom: 16px;

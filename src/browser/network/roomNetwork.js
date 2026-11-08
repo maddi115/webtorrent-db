@@ -4,7 +4,8 @@
 // shortcut. Links hop between cells, so each browser keeps few connections.
 import { getRelaySockets, joinRoom, selfId } from 'trystero';
 import { peerManager } from './peerManager.js';
-import { getTopic, setTopic } from '../../shared/rooms.js';
+import { getRoomName, getTopic, setTopic } from '../../shared/rooms.js';
+import { resetRoomPresence, sayGone } from './roomPresence.js';
 import { recordShared } from '../../shared/shareStats.js';
 import {
     getRelayUrls, getRtcConfig, getTurnConfig, loadTurnConfig, networkSettings, saveRelayHealth
@@ -376,18 +377,20 @@ function scheduleRebalance(delay = 300) {
 export function switchTopic(topic) {
     if (topic === getTopic()) return;
 
+    sayGone();
     closeAllRooms();
     fullCells.clear();
     emptyCells.clear();
     peerManager.resetRequests();
     setTopic(topic);
+    resetRoomPresence();
     start();
     peerManager.statusChanged();
 }
 
 export function getRoomLabel() {
-    if (isHelper) return `${getTopic()} helper (${links.size} cells)`;
-    return `${getTopic()}${home > 0 ? ` ${home + 1}` : ''}${links.size ? ' + link' : ''}`;
+    if (isHelper) return `${getRoomName()} helper (${links.size} groups)`;
+    return `${getRoomName()}${home > 0 ? ` · group ${home + 1}` : ''}${links.size ? ' + link' : ''}`;
 }
 
 export function getCellStats() {
@@ -447,6 +450,7 @@ setInterval(() => scheduleRebalance(), 5000);
 
 // Say goodbye when the page closes, so others drop you right away
 window.addEventListener('pagehide', () => {
+    sayGone();
     peerManager.broadcast({ type: 'bye' });
     closeAllRooms();
 });

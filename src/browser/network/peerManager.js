@@ -12,6 +12,7 @@ import { renderPeerTable } from '../ui/peerTable.js';
 import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
 import { handleFingerprints, handleLists, startSync } from './smartSync.js';
 import { receiveDeletes } from './deletes.js';
+import { forgetMember, receiveHere } from './roomPresence.js';
 import { handleChunk, handleChunkRequest, handleLinkGap, handleOffer } from './snapshotManager.js';
 
 const MAX_SYNC_ITEMS = 5000;
@@ -85,6 +86,7 @@ class PeerManager {
         }
 
         linkPeers.removePeer(peerId);
+        forgetMember(peerId);
         this.peers.delete(peerId);
         this.peerIds.delete(peerId);
         this.profiles.delete(peerId);
@@ -118,7 +120,7 @@ class PeerManager {
     handlePeerData(data, connection) {
         const seen = this.profiles.get(connection.peer);
         if (seen) seen.lastSeen = Date.now();
-        if (!['peer_status', 'ping', 'pong'].includes(data.type)) logger.info(`🎯 Received data, type: ${data.type}`);
+        if (!['peer_status', 'ping', 'pong', 'here'].includes(data.type)) logger.info(`🎯 Received data, type: ${data.type}`);
 
         switch (data.type) {
             case 'handshake':
@@ -139,6 +141,10 @@ class PeerManager {
 
             case 'ping':
                 connection.send({ type: 'pong' });
+                break;
+
+            case 'here':
+                receiveHere(data, connection);
                 break;
 
             case 'delete':

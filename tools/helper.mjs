@@ -53,8 +53,8 @@ function waitForPort(port) {
 
 async function main() {
     const rooms = process.argv.slice(2).length ? process.argv.slice(2) : ['general'];
-    const unknown = rooms.find((room) => !ROOMS.includes(room));
-    if (unknown) throw new Error(`Unknown room: ${unknown}. Rooms: ${ROOMS.join(', ')}`);
+    const unknown = rooms.find((room) => !ROOMS.includes(room) && !/^[1-6]$/.test(room));
+    if (unknown) throw new Error(`Unknown room: ${unknown}. Use a number from 1 to 6.`);
 
     console.log('Building the app...');
     const relay = startRelay({ port: RELAY_PORT });

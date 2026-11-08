@@ -7,7 +7,9 @@ Each browser keeps its own copy and shares links directly with other browsers.
 
 ## What it does
 
-- Topic rooms made of small cells of 4 people, linked into one network
+- 6 rooms (Room 1 to Room 6), each holding up to 50 people.
+  If a room is full, the newest arrivals move to the next room.
+- Each room is made of small groups of 4 people, linked into one network
 - Direct browser-to-browser sharing over WebRTC
 - Local storage and full-text search with WASM SQLite
 - Smart sync that sends only the links another peer is missing

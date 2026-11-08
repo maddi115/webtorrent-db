@@ -97,7 +97,8 @@ export async function renderPeerTable() {
 
     const mine = peerManager.peers.size;
     const theirs = profiles.reduce((total, [, profile]) => total + profile.connections, 0);
-    document.getElementById('peer-room-name').textContent = getRoomLabel();
+    const { getRoomCount, ROOM_MAX } = await import('../network/roomPresence.js');
+    document.getElementById('peer-room-name').textContent = `${getRoomLabel()} (${getRoomCount()}/${ROOM_MAX})`;
     document.getElementById('peer-relay-count').textContent = getRelayCount();
     const { getTurnConfig } = await import('../../shared/networkConfig.js');
     document.getElementById('peer-turn-status').textContent = getTurnConfig() ? 'on' : 'off';
