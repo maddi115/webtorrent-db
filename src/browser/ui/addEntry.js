@@ -6,6 +6,8 @@ import { extractSlug, extractTitle } from '../../shared/urlParser.js';
 import { getUsername } from '../../shared/username.js';
 import { getTopic } from '../../shared/rooms.js';
 import { signEntry } from '../../shared/signing.js';
+import { addWork } from '../../shared/work.js';
+import { savePost } from '../network/nostrStore.js';
 import { makeThumbHash, resizeImage } from '../../shared/images.js';
 import { cleanURL, getDownloadMagnet, normalizeMagnet } from '../../shared/links.js';
 
@@ -77,6 +79,17 @@ export function initAddEntry() {
         };
         await signEntry(entry);
 
+        // About a second of work, so spam is expensive. The button shows it is busy.
+        const label = addBtn.textContent;
+        addBtn.disabled = true;
+        addBtn.textContent = '⏳ Posting...';
+        try {
+            await addWork(entry);
+        } finally {
+            addBtn.disabled = false;
+            addBtn.textContent = label;
+        }
+
         const status = await saveOwnEntry(entry);
         if (status === 'too-fast') {
             showToast('Slow down: you can post 10 links a minute');
@@ -90,6 +103,7 @@ export function initAddEntry() {
         const slug = extractSlug(sourceURL);
         linkPeers.announceContent(slug);
         gossip.propagateEntry(entry);
+        savePost(entry);
         
         showToast(`✅ Added: ${title}`);
         window.dispatchEvent(new CustomEvent('posts-changed'));

@@ -16,6 +16,7 @@ import { downloadManager } from './browser/downloads/downloadManager.js';
 import { presenceManager } from './browser/network/presence.js';
 import { logger } from './shared/logger.js';
 import { getUsername } from './shared/username.js';
+import { getTopic } from './shared/rooms.js';
 
 function showStorageWarning() {
     const warning = document.createElement('p');
@@ -55,6 +56,11 @@ async function init() {
     initPeerTable();
     initChat();
     initMyPosts();
+
+    // Links saved on the relays, for when nobody else is online
+    import('./browser/network/nostrStore.js')
+        .then(({ loadFromRelays }) => loadFromRelays(getTopic()))
+        .catch(() => {});
     
     const username = getUsername();
     const usernameDisplay = document.getElementById('username-display');

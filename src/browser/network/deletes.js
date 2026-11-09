@@ -4,6 +4,7 @@ import { peerManager } from './peerManager.js';
 import { applyDeletes, applyWipe, getWipe } from '../storage/db.js';
 import { signDelete, signWipe } from '../../shared/signing.js';
 import { publishChat } from './chatRelay.js';
+import { saveDeletes, saveWipe } from './nostrStore.js';
 import { logger } from '../../shared/logger.js';
 
 const MAX_NOTES = 100;
@@ -37,6 +38,7 @@ export async function deleteOwnPost(entryId) {
     const deletes = applied.map(pack);
     peerManager.broadcast({ type: 'delete', deletes });
     publishChat({ kind: 'delete', deletes }).catch(() => {});
+    saveDeletes(deletes);
     logger.info('🗑️ Deleted a post');
     await refresh();
     return true;
@@ -74,6 +76,7 @@ export async function clearAllPosts() {
 
     peerManager.broadcast({ type: 'wipe', wipe: note });
     publishChat({ kind: 'wipe', wipe: note }).catch(() => {});
+    saveWipe(note);
     logger.info('🧹 Cleared all posts');
     await refresh();
     return true;

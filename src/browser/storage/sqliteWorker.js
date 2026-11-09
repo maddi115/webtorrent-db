@@ -3,6 +3,7 @@ import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { getEntryId } from '../../shared/entryId.js';
 import { cleanRemoteEntry } from '../../shared/entryRules.js';
 import { verifyDelete, verifyEntry, verifyWipe } from '../../shared/signing.js';
+import { hasWork, needsWork, WORK_BITS, WORK_REQUIRED_AFTER } from '../../shared/work.js';
 import {
     compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
 } from '../../shared/snapshot.js';
@@ -19,7 +20,7 @@ const ENTRY_COLUMNS = `
     entry_id AS entryId, room, source_url AS sourceURL, magnet,
     instant_io_link AS instantIOLink, title, added_by AS addedBy, timestamp,
     thumb, thumb_hash AS thumbHash, has_preview AS hasPreview,
-    author_key AS authorKey, signature
+    author_key AS authorKey, signature, work
 `;
 
 let db;
@@ -28,6 +29,7 @@ const syncIndexes = new Map();
 const snapshots = new Map();
 const blockedKeys = new Map();
 let adminKeys = new Set();
+let workRules = { bits: WORK_BITS, after: WORK_REQUIRED_AFTER };
 let wipeBefore = null;
 
 const SCHEMA = `
@@ -121,14 +123,15 @@ async function openDatabase() {
     db.exec('PRAGMA synchronous = NORMAL;');
     db.exec(SCHEMA);
     const columns = db.selectObjects('PRAGMA table_info(entries)');
-    const addColumn = (name) => {
+    const addColumn = (name, type = 'TEXT') => {
         if (!columns.some((column) => column.name === name)) {
-            db.exec(`ALTER TABLE entries ADD COLUMN ${name} TEXT`);
+            db.exec(`ALTER TABLE entries ADD COLUMN ${name} ${type}`);
         }
     };
     addColumn('thumb_hash');
     addColumn('author_key');
     addColumn('signature');
+    addColumn('work', 'INTEGER');
     db.exec('CREATE INDEX IF NOT EXISTS entries_author_time ON entries(author_key, timestamp)');
     return { storageMode };
 }
@@ -196,8 +199,8 @@ function insertEntry(entry) {
         sql: `INSERT OR IGNORE INTO entries (
             entry_id, room, source_url, magnet, instant_io_link, title,
             added_by, timestamp, thumb, thumb_hash, has_preview, preview,
-            author_key, signature
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            author_key, signature, work
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         bind: [
             entry.entryId,
             entry.room || 'general',
@@ -212,7 +215,8 @@ function insertEntry(entry) {
             entry.hasPreview ? 1 : 0,
             entry.preview || null,
             entry.signature ? entry.authorKey : null,
-            entry.signature || null
+            entry.signature || null,
+            Number.isSafeInteger(entry.work) ? entry.work : null
         ]
     });
     const added = db.changes() > 0;
@@ -349,6 +353,10 @@ async function receiveEntries(room, rawEntries) {
             reject('known');
             continue;
         }
+        if (needsWork(entry.timestamp, workRules.after) && !await hasWork(entry, workRules.bits)) {
+            reject('no-work');
+            continue;
+        }
         if (!await verifyEntry(entry)) { reject('bad-signature'); continue; }
         checked.push(entry);
     }
@@ -399,6 +407,10 @@ const methods = {
     applyDeletes,
 
     applyWipe,
+
+    setWorkRules(rules) {
+        if (Number.isFinite(rules?.bits) && Number.isFinite(rules?.after)) workRules = rules;
+    },
 
     setAdminKeys(keys) {
         adminKeys = new Set(Array.isArray(keys) ? keys : []);
@@ -518,6 +530,14 @@ const methods = {
             }
             return { p: prefix, c: end - start, f: fingerprint };
         });
+    },
+
+    // Time and ID of every signed link in a room, for Negentropy sync
+    getSyncItems(room) {
+        return db.selectArrays(
+            'SELECT timestamp, entry_id FROM entries WHERE room = ? AND signature IS NOT NULL',
+            [room]
+        );
     },
 
     getSyncIds(room, prefix) {

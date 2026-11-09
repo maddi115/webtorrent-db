@@ -10,7 +10,7 @@ import { extractSlug } from '../../shared/urlParser.js';
 import { MAX_AVATAR_CHARS, MAX_PREVIEW_CHARS, safeImage, shortText } from '../../shared/safe.js';
 import { renderPeerTable } from '../ui/peerTable.js';
 import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
-import { handleFingerprints, handleLists, startSync } from './smartSync.js';
+import { handleFingerprints, handleLists, handleNeg, handleNegReply, startSync, SYNC_VERSION } from './smartSync.js';
 import { receiveDeletes, receiveWipe, sendWipe } from './deletes.js';
 import { forgetMember, receiveHere } from './roomPresence.js';
 import { receiveChat, receiveHistory, sendHistory } from './chat.js';
@@ -78,7 +78,8 @@ class PeerManager {
             username: getUsername(),
             avatar: getAvatar(),
             ...connection.info(),
-            links: await getEntryCount()
+            links: await getEntryCount(),
+            sync: SYNC_VERSION
         });
     }
 
@@ -182,8 +183,16 @@ class PeerManager {
                 handleLists(data, connection, (ids, peer) => this.requestMissing(ids, peer));
                 break;
 
+            case 'neg':
+                handleNeg(data, connection);
+                break;
+
+            case 'neg_reply':
+                handleNegReply(data, connection, (ids, peer) => this.requestMissing(ids, peer));
+                break;
+
             case 'snapshot_offer':
-                handleOffer(data, connection, (peer) => startSync(peer, true));
+                handleOffer(data, connection, (peer) => startSync(peer, true, this.syncVersionOf(peer)));
                 break;
 
             case 'snapshot_get':
@@ -246,6 +255,7 @@ class PeerManager {
         profile.joinedAt = Number.isFinite(data.joinedAt) ? data.joinedAt : Date.now();
         profile.home = typeof data.home === 'string' ? data.home.slice(0, 200) : null;
         profile.role = data.role === 'helper' ? 'helper' : null;
+        profile.sync = data.sync === SYNC_VERSION ? SYNC_VERSION : 1;
         profile.ring = Number.isSafeInteger(data.ring) ? data.ring : null;
         this.onNetworkInfo(data);
         this.handleProfile(data, connection);
@@ -263,10 +273,10 @@ class PeerManager {
             connection,
             await getEntryCount(),
             theirLinks,
-            (peer) => startSync(peer, true)
+            (peer) => startSync(peer, true, this.syncVersionOf(peer))
         );
 
-        if (!waiting) startSync(connection);
+        if (!waiting) startSync(connection, false, this.syncVersionOf(connection));
     }
 
     handleChunk(data, metadata, peerId) {
@@ -309,6 +319,10 @@ class PeerManager {
             profile.links = data.links;
         }
         renderPeerTable();
+    }
+
+    syncVersionOf(connection) {
+        return this.profiles.get(connection.peer)?.sync || 1;
     }
 
     requestMissing(ids, connection) {

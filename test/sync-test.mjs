@@ -12,6 +12,10 @@ import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { webcrypto } from 'node:crypto';
+import WebSocket from 'ws';
+
+// Test pages always ask for proof of work, at an easier level so the test stays quick
+const TEST_WORK = '&powAfter=0&powBits=12';
 
 const APP_PORT = 3107;
 const APP_URL = `http://localhost:${APP_PORT}`;
@@ -66,7 +70,7 @@ async function openPeer(browser, name, setup, options = `testRoom=${TEST_ROOM}`)
     if (setup) await setup(context);
     const page = await context.newPage();
     page.on('pageerror', (e) => console.log(`  [${name} error] ${e.message}`));
-    await page.goto(`${APP_URL}/?${options}`);
+    await page.goto(`${APP_URL}/?${options}${TEST_WORK}`);
     await page.waitForFunction(() => document.getElementById('username-display')?.textContent);
     return page;
 }
@@ -211,7 +215,9 @@ export async function run({ setup } = {}) {
             const { getEntryByURL } = await import('/src/browser/storage/db.js');
             const { toPublicEntry } = await import('/src/shared/entryId.js');
             const { gossip } = await import('/src/browser/network/gossip.js');
-            const { importSigningKey, signEntry, toBase64Url } = await import('/src/shared/signing.js');
+            const { importSigningKey, signEntry: signOnly, toBase64Url } = await import('/src/shared/signing.js');
+            const { addWork } = await import('/src/shared/work.js');
+            const signEntry = async (entry, keys) => addWork(await signOnly(entry, keys));
             const makeKeys = async () => {
                 const pair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
                 return importSigningKey(
@@ -486,6 +492,83 @@ export async function run({ setup } = {}) {
         await a.click('#chat-close');
         await b.click('#chat-close');
 
+        const workChecks = await b.evaluate(async (stamp) => {
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { toPublicEntry } = await import('/src/shared/entryId.js');
+            const { gossip } = await import('/src/browser/network/gossip.js');
+            const { signEntry } = await import('/src/shared/signing.js');
+            const { hasWork } = await import('/src/shared/work.js');
+            const lazy = await signEntry({
+                sourceURL: `https://example.com/t/no-work-${stamp}/1`, magnet: null, instantIOLink: null,
+                title: 'no work', addedBy: `Lazy${stamp}`, timestamp: Date.now(), room: 'general', hasPreview: false
+            });
+            await gossip.receiveEntry(toPublicEntry(lazy), 'test-peer');
+            const real = await getEntryByURL(`https://example.com/t/fake-link-a-${stamp}/1`);
+            return {
+                lazyKept: Boolean(await getEntryByURL(lazy.sourceURL)),
+                realHasWork: Number.isSafeInteger(real?.work) && await hasWork(real, 12)
+            };
+        }, ID);
+        report('Posts without proof of work are rejected', !workChecks.lazyKept);
+        report('Real posts carry proof of work', workChecks.realHasWork);
+        report('The live site asks for 18 bits of work', await b.evaluate(async () => {
+            const code = await (await fetch('/src/shared/work.js')).text();
+            return /: 18;/.test(code) && /Date\.UTC\(2026, 10, 10\)/.test(code);
+        }));
+
+        const storeRelay = startRelay({ port: 7792, store: true });
+        const storeOptions = `testRoom=${TEST_ROOM}-store&storeRelay=ws://localhost:7792`;
+        const storePoster = await openPeer(browser, 'StorePoster', setup, storeOptions);
+        const keptURL = `https://example.com/t/kept-on-relay-${ID}/1`;
+        const goneURL = `https://example.com/t/deleted-on-relay-${ID}/1`;
+        await addLink(storePoster, keptURL, { magnet: `magnet:?xt=urn:btih:${hash}`, title: 'Kept on relay' });
+        await addLink(storePoster, goneURL, { magnet: `magnet:?xt=urn:btih:${hash}` });
+        const goneEntry = await hasLink(storePoster, goneURL);
+        await hasLink(storePoster, keptURL);
+        await storePoster.evaluate(async (id) => {
+            const { deleteOwnPost } = await import('/src/browser/network/deletes.js');
+            await deleteOwnPost(id);
+        }, goneEntry.entryId);
+        await new Promise((r) => setTimeout(r, 1500));
+        const keptEntry = await storePoster.evaluate(async (url) => {
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            return getEntryByURL(url);
+        }, keptURL);
+        await storePoster.close();
+
+        // Someone puts a changed copy straight onto the relay
+        await new Promise((resolve) => {
+            const socket = new WebSocket('ws://localhost:7792');
+            socket.on('open', () => {
+                const forged = { u: `https://example.com/t/forged-${ID}/1`, a: keptEntry.addedBy, s: keptEntry.timestamp,
+                    t: 'Forged', k: keptEntry.authorKey, g: keptEntry.signature, w: keptEntry.work };
+                socket.send(JSON.stringify(['EVENT', { id: 'f'.repeat(64), pubkey: 'e'.repeat(64), created_at: 1, kind: 30078,
+                    tags: [['d', 'forged'], ['t', `${TEST_ROOM}-store-general`]], content: JSON.stringify(forged), sig: '0'.repeat(128) }]));
+                setTimeout(() => { socket.close(); resolve(); }, 300);
+            });
+        });
+
+        const visitorPage = await openPeer(browser, 'StoreVisitor', setup, storeOptions);
+        const loadedFromRelay = await hasLink(visitorPage, keptURL);
+        const visitorState = await visitorPage.evaluate(async ({ gone, forged }) => {
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { storeStats } = await import('/src/browser/network/nostrStore.js');
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            await new Promise((r) => setTimeout(r, 1000));
+            return {
+                loaded: storeStats.loaded,
+                peers: peerManager.peers.size,
+                goneBack: Boolean(await getEntryByURL(gone)),
+                forgedKept: Boolean(await getEntryByURL(forged))
+            };
+        }, { gone: goneURL, forged: `https://example.com/t/forged-${ID}/1` });
+        report('New visitors get links from relays when nobody is online', Boolean(loadedFromRelay)
+            && visitorState.loaded > 0 && visitorState.peers === 0, JSON.stringify(visitorState));
+        report('Deleted posts stay deleted for new visitors', !visitorState.goneBack);
+        report('Changed copies on relays are rejected', !visitorState.forgedKept);
+        await visitorPage.close();
+        await storeRelay.close();
+
         const adminKey = await makeTestKey();
         const adminOptions = `testRoom=${TEST_ROOM}-admin&adminKey=${adminKey.publicKey}`;
         const adminContext = await browser.newContext();
@@ -495,7 +578,7 @@ export async function run({ setup } = {}) {
         }, adminKey);
         const admin = await adminContext.newPage();
         admin.on('pageerror', (e) => console.log(`  [Admin error] ${e.message}`));
-        await admin.goto(`${APP_URL}/?${adminOptions}`);
+        await admin.goto(`${APP_URL}/?${adminOptions}${TEST_WORK}`);
         await admin.waitForFunction(() => document.getElementById('username-display')?.textContent);
         const member = await openPeer(browser, 'Member', setup, adminOptions);
         await Promise.all([waitForPeers(admin, 1), waitForPeers(member, 1)]);
@@ -730,7 +813,7 @@ export async function run({ setup } = {}) {
         await h.selectOption('#room-select', 'music');
         report('Same topic gets the link', Boolean(await hasLink(h, u9)));
 
-        const syncOptions = `testRoom=${TEST_ROOM}-smart`;
+        const syncOptions = `testRoom=${TEST_ROOM}-smart&powBits=0`;
         const seedSyncLinks = async (page, onlyHere, offset) => page.evaluate(async ({ only, time, key, extraTime }) => {
             const { importEntries, updateEntryCount } = await import('/src/browser/storage/db.js');
             const { importSigningKey, signEntry } = await import('/src/shared/signing.js');
@@ -762,6 +845,29 @@ export async function run({ setup } = {}) {
         const aGot = await hasLink(syncA.page, 'https://example.com/t/only-b-3/1');
         const bGot = await hasLink(syncB.page, 'https://example.com/t/only-a-3/1');
         report('Smart sync swaps only what is missing', Boolean(aGot && bGot));
+        const negentropyUsed = await Promise.all([syncA.page, syncB.page].map((page) => page.evaluate(async () => {
+            const { syncStats } = await import('/src/browser/network/smartSync.js');
+            return syncStats.negentropy;
+        })));
+        report('Sync uses Negentropy', negentropyUsed[0] + negentropyUsed[1] > 0, JSON.stringify(negentropyUsed));
+        const oldMethod = await syncA.page.evaluate(async ({ key, time }) => {
+            const { importEntries, getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { importSigningKey, signEntry } = await import('/src/shared/signing.js');
+            const { startSync, forgetSyncCache } = await import('/src/browser/network/smartSync.js');
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            const keys = await importSigningKey(key.privateKey, key.publicKey);
+            const entry = await signEntry({
+                sourceURL: 'https://example.com/t/old-method-link/1', title: 'old method', addedBy: 'Sync Test',
+                timestamp: time, room: 'general', magnet: null, hasPreview: false
+            }, keys);
+            await importEntries([entry]);
+            forgetSyncCache();
+            const [connection] = [...peerManager.peers.values()];
+            await startSync(connection, true, 1);
+            return Boolean(await getEntryByURL(entry.sourceURL));
+        }, { key: testKey, time: ID - 60 * 60 * 1000 });
+        report('Older browsers still sync the old way', oldMethod
+            && Boolean(await hasLink(syncB.page, 'https://example.com/t/old-method-link/1')));
         const syncBytes = await Promise.all([syncA.page, syncB.page].map((page) => page.evaluate(async () => {
             const { syncStats } = await import('/src/browser/network/smartSync.js');
             return syncStats.sentBytes;
@@ -771,7 +877,7 @@ export async function run({ setup } = {}) {
         await syncA.context.close();
         await syncB.context.close();
 
-        const shareOptions = `testRoom=${TEST_ROOM}-share&snapshotMin=100&snapshotChunk=8192`;
+        const shareOptions = `testRoom=${TEST_ROOM}-share&snapshotMin=100&snapshotChunk=8192&powBits=0`;
         const seedOldLinks = async (name) => {
             const context = await browser.newContext();
             if (setup) await setup(context);
@@ -873,7 +979,7 @@ export async function run({ setup } = {}) {
         report('Peers meet through the bootstrap relay alone', viaBootstrap, `${relay.stats.events} introductions`);
         await Promise.all(relayPages.map(({ context }) => context.close()));
 
-        const meshOptions = `testRoom=${TEST_ROOM}-mesh&capacity=3&visitors=2&linkRetryMs=1500&linkCheckMs=4000`
+        const meshOptions = `testRoom=${TEST_ROOM}-mesh&capacity=3&visitors=3&linkRetryMs=1500&linkCheckMs=4000`
             + '&relay=ws://localhost:7791&publicRelays=off';
         const mesh = [];
         for (let index = 0; index < 12; index++) {
@@ -1011,7 +1117,7 @@ export async function run({ setup } = {}) {
             JSON.stringify(relayChoice));
         await roomPage.close();
 
-        const helperOptions = `&testRoom=${TEST_ROOM}-helper`;
+        const helperOptions = `&testRoom=${TEST_ROOM}-helper${TEST_WORK}`;
         const helperData = mkdtempSync(path.join(tmpdir(), 'webtorrent-helper-'));
         const helperSettings = {
             room: 'general', baseURL: APP_URL, dataDir: helperData, query: helperOptions, setup

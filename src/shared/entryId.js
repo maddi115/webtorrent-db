@@ -42,6 +42,7 @@ export function toPublicEntry(entry) {
     if (entry.preview || entry.hasPreview) packed.p = 1;
     if (entry.authorKey) packed.k = entry.authorKey;
     if (entry.signature) packed.g = entry.signature;
+    if (Number.isSafeInteger(entry.work)) packed.w = entry.work;
     return packed;
 }
 
@@ -57,6 +58,7 @@ export function fromPublicEntry(packed) {
         thumbHash: packed?.b,
         hasPreview: packed?.p === 1,
         authorKey: packed?.k,
-        signature: packed?.g
+        signature: packed?.g,
+        work: packed?.w
     };
 }

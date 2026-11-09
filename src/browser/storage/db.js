@@ -6,6 +6,7 @@ import { getTopic } from '../../shared/rooms.js';
 import { signEntry } from '../../shared/signing.js';
 import { getUsername } from '../../shared/username.js';
 import { ADMIN_KEYS } from '../../shared/admin.js';
+import { WORK_BITS, WORK_REQUIRED_AFTER } from '../../shared/work.js';
 
 const OLD_DB_NAME = 'webtorrent-metadata-db-v2';
 const IMPORT_BATCH_SIZE = 200;
@@ -106,6 +107,7 @@ export async function signOldLinks() {
 export async function initDB() {
     ({ storageMode } = await call('open'));
     await call('setAdminKeys', ADMIN_KEYS);
+    await call('setWorkRules', { bits: WORK_BITS, after: WORK_REQUIRED_AFTER });
     await migrateOldDatabase();
     await addMissingThumbHashes();
     await signOldLinks();
@@ -135,6 +137,10 @@ export function getRoomEntries() {
 
 export function getSyncFingerprints(prefixes) {
     return ready('getSyncFingerprints', getTopic(), prefixes);
+}
+
+export function getSyncItems() {
+    return ready('getSyncItems', getTopic());
 }
 
 export function getSyncIds(prefix) {

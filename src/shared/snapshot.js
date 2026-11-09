@@ -3,7 +3,7 @@ import { extractTitle } from './urlParser.js';
 import { buildMagnet, getMagnetHash } from './links.js';
 
 const MAGIC = 'WTDB';
-const VERSION = 2;
+const VERSION = 3;
 const MAX_ENTRIES = 2000000;
 const MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
 
@@ -14,6 +14,7 @@ const HAS_TITLE = 8;
 const HAS_THUMB_HASH = 16;
 const HAS_PREVIEW = 32;
 const HAS_SIGNATURE = 64;
+const HAS_WORK = 128;
 const SIGNATURE_BYTES = 64;
 
 const encoder = new TextEncoder();
@@ -213,6 +214,7 @@ export function packSnapshot(room, entries) {
     const hashes = new Writer();
     const thumbHashes = new Writer();
     const signatures = new Writer();
+    const works = new Writer();
     const magnetTexts = [];
     const instantLinks = [];
     const titles = [];
@@ -247,6 +249,10 @@ export function packSnapshot(room, entries) {
             flag |= HAS_SIGNATURE;
             signatures.raw(base64UrlToBytes(entry.signature));
         }
+        if (Number.isSafeInteger(entry.work) && entry.work >= 0) {
+            flag |= HAS_WORK;
+            works.number(entry.work);
+        }
 
         flags.byte(flag);
         const change = entry.timestamp - previousTime;
@@ -270,13 +276,15 @@ export function packSnapshot(room, entries) {
     output.block(thumbHashes.result());
     output.block(writeLookupColumn(sorted.map((entry) => entry.authorKey || '')));
     output.block(signatures.result());
+    output.block(works.result());
     return output.result();
 }
 
 export function unpackSnapshot(bytes) {
     const reader = new Reader(bytes);
     if (decoder.decode(reader.raw(MAGIC.length)) !== MAGIC) throw new Error('Not a snapshot');
-    if (reader.byte() !== VERSION) throw new Error('Unknown snapshot version');
+    const version = reader.byte();
+    if (version !== 2 && version !== VERSION) throw new Error('Unknown snapshot version');
 
     const room = reader.text();
     const count = reader.number();
@@ -293,6 +301,7 @@ export function unpackSnapshot(bytes) {
     const thumbHashes = new Reader(reader.block());
     const authorKeys = readLookupColumn(reader.block(), count);
     const signatures = new Reader(reader.block());
+    const works = new Reader(version >= 3 ? reader.block() : new Uint8Array(0));
 
     if (flags.length !== count) throw new Error('Invalid snapshot flags');
 
@@ -321,7 +330,8 @@ export function unpackSnapshot(bytes) {
             thumbHash: flag & HAS_THUMB_HASH ? bytesToBase64(thumbHashes.block()) : null,
             hasPreview: (flag & HAS_PREVIEW) !== 0,
             authorKey: authorKeys[index] || null,
-            signature: flag & HAS_SIGNATURE ? bytesToBase64Url(signatures.raw(SIGNATURE_BYTES)) : null
+            signature: flag & HAS_SIGNATURE ? bytesToBase64Url(signatures.raw(SIGNATURE_BYTES)) : null,
+            work: flag & HAS_WORK ? works.number() : null
         };
     });
 

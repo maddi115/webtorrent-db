@@ -33,6 +33,7 @@ export function cleanRemoteEntry(rawEntry, expectedRoom) {
         preview: null,
         room,
         authorKey: isPublicKey(rawEntry.authorKey) ? rawEntry.authorKey : null,
-        signature: isSignature(rawEntry.signature) ? rawEntry.signature : null
+        signature: isSignature(rawEntry.signature) ? rawEntry.signature : null,
+        work: Number.isSafeInteger(rawEntry.work) && rawEntry.work >= 0 ? rawEntry.work : null
     };
 }

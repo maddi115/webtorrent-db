@@ -386,6 +386,7 @@ export function switchTopic(topic) {
     resetRoomPresence();
     start();
     peerManager.statusChanged();
+    import('./nostrStore.js').then(({ loadFromRelays }) => loadFromRelays(topic)).catch(() => {});
 }
 
 export function getRoomLabel() {

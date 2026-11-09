@@ -66,7 +66,7 @@ export function getMyKeys() {
 export function normalizeEntry(entry) {
     const room = entry.room || 'general';
     const clean = cleanRemoteEntry(fromPublicEntry(toPublicEntry({
-        ...entry, authorKey: null, signature: null
+        ...entry, authorKey: null, signature: null, work: null
     })), room);
     if (!clean) throw new Error('This link is not valid');
 

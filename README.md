@@ -12,7 +12,9 @@ Each browser keeps its own copy and shares links directly with other browsers.
 - Each room is made of small groups of 4 people, linked into one network
 - Direct browser-to-browser sharing over WebRTC
 - Local storage and full-text search with WASM SQLite
-- Smart sync that sends only the links another peer is missing
+- Negentropy sync (the method Nostr uses) that finds missing links with very little data
+- Signed posts are also saved on Nostr relays, so new visitors get links even when nobody is online
+- Each new post solves a small puzzle first (proof of work), so mass spam is expensive
 - Compressed room snapshots, shared in verified chunks from several peers
 - Tiny ThumbHash previews, with images loaded only when needed
 - Profile pictures and custom usernames of up to 5 letters
@@ -20,6 +22,8 @@ Each browser keeps its own copy and shares links directly with other browsers.
 - One global chat for everyone in every room. It keeps only the newest 25 messages,
   blocks links, and shows messages as plain text only
 - A spam limit of 10 links a minute per person
+- Each group of 4 links to the next group and adds two shortcuts, so a post reaches
+  5,000 people in about 6 hops
 - A live table showing who is online
 - Sharing stats and a seeding switch
 - An optional helper that keeps rooms online and links up to 16 cells
@@ -103,7 +107,8 @@ and hands out logins that expire after a day. To switch TURN on for the live sit
 deploy the worker and save its address as the `TURN_ENDPOINT` repository variable.
 Open the site with `?turnOnly=1` to force every connection through TURN and check it works.
 
-To let other PCs use your bootstrap relay, run `npm run relay -- --public`
+To let other PCs use your bootstrap relay, run `npm run relay -- --public`.
+Add `--store` to also keep saved posts, so new visitors can load them from your relay.
 behind a secure address. Browsers on https pages need `wss://` relays.
 
 ## Test it

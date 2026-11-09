@@ -113,7 +113,8 @@ export function getRtcConfig() {
 export const networkSettings = {
     roomPrefix: devOptions.get('testRoom') ? `${devOptions.get('testRoom')}-` : 'v1-',
     cellSize: Number(devOptions.get('capacity')) || 4,
-    visitorSlots: Number(devOptions.get('visitors')) || 2,
+    // The first person in each group links around the ring, the next two add shortcuts
+    visitorSlots: Number(devOptions.get('visitors')) || 3,
     aloneMs: Number(devOptions.get('rejoinMs')) || 90000,
     linkRetryMs: Number(devOptions.get('linkRetryMs')) || 20000,
     linkCheckMs: Number(devOptions.get('linkCheckMs')) || 8000,
