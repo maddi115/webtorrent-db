@@ -235,7 +235,14 @@ export function searchEntries(query) {
     return ready('searchEntries', getTopic(), query);
 }
 
+// Any change to the links means the next sync must read them again
+async function forgetSync() {
+    const { forgetSyncCache } = await import('../network/smartSync.js');
+    forgetSyncCache();
+}
+
 export async function updateEntryCount() {
+    forgetSync();
     const count = await getEntryCount();
     const countEl = document.getElementById('entry-count');
     if (countEl) countEl.textContent = count;

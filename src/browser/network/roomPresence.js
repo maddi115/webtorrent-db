@@ -16,6 +16,8 @@ const MAX_MOVES = 6;
 const MAX_TRACKED = 500;
 
 const members = new Map();
+// People who just left. An older "I'm here" from them that arrives late must not count them again.
+const goneAt = new Map();
 let joinedAt = Date.now();
 let moves = 0;
 let onMove = () => {};
@@ -30,6 +32,9 @@ function prune() {
     const now = Date.now();
     for (const [id, member] of members) {
         if (now - member.seenAt > GONE_MS) members.delete(id);
+    }
+    for (const [id, time] of goneAt) {
+        if (now - time > GONE_MS * 2) goneAt.delete(id);
     }
 }
 
@@ -51,7 +56,9 @@ export function receiveHere(data, connection) {
 
     const known = members.get(data.id);
     if (known && known.t >= data.t) return;
+    if ((goneAt.get(data.id) || 0) >= data.t) return;
     if (data.gone === true) {
+        goneAt.set(data.id, data.t);
         if (!known) return;
         members.delete(data.id);
     } else {
@@ -86,6 +93,7 @@ function checkCapacity() {
 // Someone you were connected to left, so stop counting them right away
 export function forgetMember(peerId) {
     members.delete(peerId);
+    goneAt.set(peerId, Date.now());
 }
 
 // Tells the room you are leaving, so its count drops right away
@@ -97,6 +105,7 @@ export function sayGone() {
 // Call this whenever you change rooms
 export function resetRoomPresence() {
     members.clear();
+    goneAt.clear();
     joinedAt = Date.now();
     setTimeout(sayHere, 1500);
 }

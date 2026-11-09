@@ -116,6 +116,8 @@ export const networkSettings = {
     // The first person in each group links around the ring, the next two add shortcuts
     visitorSlots: Number(devOptions.get('visitors')) || 3,
     aloneMs: Number(devOptions.get('rejoinMs')) || 90000,
+    // Someone who stops answering for this long is gone, so their dead connection is closed
+    staleMs: Number(devOptions.get('staleMs')) || 20000,
     linkRetryMs: Number(devOptions.get('linkRetryMs')) || 20000,
     linkCheckMs: Number(devOptions.get('linkCheckMs')) || 8000,
     helperCells: Number(devOptions.get('helperCells')) || 16,

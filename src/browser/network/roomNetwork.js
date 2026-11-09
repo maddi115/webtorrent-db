@@ -10,6 +10,7 @@ import { recordShared } from '../../shared/shareStats.js';
 import {
     getRelayUrls, getRtcConfig, getTurnConfig, loadTurnConfig, networkSettings, saveRelayHealth
 } from '../../shared/networkConfig.js';
+import { resumeRelayReconnection } from 'trystero';
 import { logger } from '../../shared/logger.js';
 
 const APP_ID = 'maddi115-webtorrent-p2p-db';
@@ -383,6 +384,7 @@ export function switchTopic(topic) {
     emptyCells.clear();
     peerManager.resetRequests();
     setTopic(topic);
+    import('./smartSync.js').then(({ forgetSyncCache }) => forgetSyncCache());
     resetRoomPresence();
     start();
     peerManager.statusChanged();
@@ -465,17 +467,55 @@ setInterval(checkRelays, 10 * RELAY_CHECK_MS);
 scheduleRejoin();
 setInterval(() => scheduleRebalance(), 5000);
 
-// Say goodbye when the page closes, so others drop you right away
-window.addEventListener('pagehide', () => {
+// Closes one person's connection in every room, so a dead connection does not block a new one
+function dropPeer(peerId) {
+    rooms.forEach((entry) => {
+        try {
+            entry.room.getPeers?.()[peerId]?.close();
+        } catch {
+            // Already closed
+        }
+    });
+}
+
+function sayGoodbye() {
     sayGone();
     peerManager.broadcast({ type: 'bye' });
     closeAllRooms();
-});
+}
+
+// Coming back after the screen was off or the network dropped: join again right away
+function wakeUp() {
+    rejoinWait = aloneMs;
+    try {
+        resumeRelayReconnection?.();
+    } catch {
+        // Relays reconnect on their own as well
+    }
+    if (moving) return;
+    if (rooms.size === 0 || peerManager.peers.size === 0) {
+        closeAllRooms();
+        start();
+        peerManager.statusChanged();
+    } else {
+        peerManager.checkAlive();
+    }
+}
+
+// Say goodbye when the page closes or a phone puts it to sleep, so others drop you right away
+window.addEventListener('pagehide', sayGoodbye);
+document.addEventListener('freeze', sayGoodbye);
+document.addEventListener('resume', wakeUp);
 window.addEventListener('pageshow', (event) => {
-    if (event.persisted) start();
+    if (event.persisted) wakeUp();
+});
+window.addEventListener('online', wakeUp);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') wakeUp();
 });
 
 peerManager.onMembersChanged = () => scheduleRebalance();
+peerManager.onStalePeer = dropPeer;
 peerManager.onNetworkInfo = learnNetwork;
 logger.info(`✅ My peer ID: ${selfId}`);
 loadTurnConfig().then((turnOn) => {

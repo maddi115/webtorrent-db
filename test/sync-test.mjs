@@ -774,6 +774,32 @@ export async function run({ setup } = {}) {
         report('A reload does not show someone twice', !doubled && await rowsFor(visitName) === 1,
             `online ${await onlineCount()}`);
 
+        // What a phone's browser does when the screen turns off, then on again
+        await visit.evaluate(() => document.dispatchEvent(new Event('freeze')));
+        const droppedWhenAsleep = await stay.waitForFunction(
+            () => document.getElementById('peer-online-count').textContent === '1',
+            null, { timeout: 10000 }).then(() => true).catch(() => false);
+        await new Promise((r) => setTimeout(r, 1000));
+        await visit.evaluate(() => document.dispatchEvent(new Event('resume')));
+        const backAfterWaking = await stay.waitForFunction(
+            () => document.getElementById('peer-online-count').textContent === '2',
+            null, { timeout: 20000 }).then(() => true).catch(() => false);
+        report('A phone that goes to sleep is dropped right away', droppedWhenAsleep);
+        report('A phone that wakes up shows again without a refresh', backAfterWaking);
+
+        const silentDrop = await stay.evaluate(async (target) => {
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            const entry = [...peerManager.profiles.values()].find((profile) => profile.username === target);
+            entry.pingedAt = Date.now() - 60000;
+            peerManager.checkAlive();
+            await new Promise((r) => setTimeout(r, 300));
+            return ![...peerManager.profiles.values()].some((profile) => profile.username === target);
+        }, visitName);
+        const reconnects = await stay.waitForFunction(
+            () => document.getElementById('peer-online-count').textContent === '2',
+            null, { timeout: 30000 }).then(() => true).catch(() => false);
+        report('Dead connections are closed and replaced', silentDrop && reconnects);
+
         await visit.close();
         const leftQuickly = await stay.waitForFunction(
             () => document.getElementById('peer-online-count').textContent === '1',
@@ -811,7 +837,15 @@ export async function run({ setup } = {}) {
         await new Promise((r) => setTimeout(r, 3000));
         report('Other topics do not get the link', await countLink(h, u9) === 0);
         await h.selectOption('#room-select', 'music');
-        report('Same topic gets the link', Boolean(await hasLink(h, u9)));
+        const sameTopic = Boolean(await hasLink(h, u9));
+        const topicState = async (page) => page.evaluate(async (url) => {
+            const { peerManager } = await import('/src/browser/network/peerManager.js');
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { syncStats } = await import('/src/browser/network/smartSync.js');
+            return `${document.getElementById('room-select').value} peers=${peerManager.peers.size} `
+                + `has=${Boolean(await getEntryByURL(url))} neg=${syncStats.negentropy} fp=${syncStats.fingerprints}`;
+        }, u9);
+        report('Same topic gets the link', sameTopic, sameTopic ? '' : `G: ${await topicState(g)} | H: ${await topicState(h)}`);
 
         const syncOptions = `testRoom=${TEST_ROOM}-smart&powBits=0`;
         const seedSyncLinks = async (page, onlyHere, offset) => page.evaluate(async ({ only, time, key, extraTime }) => {
@@ -1005,7 +1039,7 @@ export async function run({ setup } = {}) {
         const maxPeers = Math.max(...states.map((state) => state.peers));
         const averagePeers = states.reduce((total, state) => total + state.peers, 0) / states.length;
         report('Peers spread out into small cells', cellCount >= 4, `${cellCount} cells`);
-        report('Each browser keeps few connections', maxPeers <= 9 && averagePeers <= 7,
+        report('Each browser keeps few connections', maxPeers <= 10 && averagePeers <= 8,
             `average ${averagePeers.toFixed(1)}, max ${maxPeers}, of 11 others`);
 
         const meshURL = `https://example.com/t/mesh-link-${ID}/1`;

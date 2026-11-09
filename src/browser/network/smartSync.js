@@ -3,6 +3,7 @@ import { selfId } from 'trystero';
 import { getSyncFingerprints, getSyncIds, getSyncItems, getEntryById } from '../storage/db.js';
 import { toPublicEntry } from '../../shared/entryId.js';
 import { bytesToHex, hexToBytes, Negentropy, Storage } from '../../shared/negentropy.js';
+import { getTopic } from '../../shared/rooms.js';
 
 const MAX_LIST_SIZE = 64;
 const MAX_PREFIXES = 4096;
@@ -25,17 +26,21 @@ function isPrefix(value) {
 
 // Newer browsers say they can use Negentropy. Older ones get the first sync method.
 export const SYNC_VERSION = 2;
-const STORAGE_REUSE_MS = 20000;
+const STORAGE_REUSE_MS = 5000;
 const MAX_NEG_HEX = 4 * 1024 * 1024;
 const MAX_ENTRIES_SENT = 5000;
 const sessions = new Map();
 let cachedStorage = null;
 
+// The list is reused for a few seconds, but only for the same room, and never after a change
 async function getStorage() {
-    if (cachedStorage && Date.now() - cachedStorage.at < STORAGE_REUSE_MS) return cachedStorage.storage;
+    const room = getTopic();
+    if (cachedStorage?.room === room && Date.now() - cachedStorage.at < STORAGE_REUSE_MS) {
+        return cachedStorage.storage;
+    }
     const rows = await getSyncItems();
     const storage = new Storage(rows.map(([timestamp, id]) => ({ timestamp, id })));
-    cachedStorage = { at: Date.now(), storage };
+    cachedStorage = { at: Date.now(), room, storage };
     return storage;
 }
 

@@ -1,5 +1,6 @@
 // peerManager.js - Track connected peers and handle their messages
 import { logger } from '../../shared/logger.js';
+import { networkSettings } from '../../shared/networkConfig.js';
 import { gossip } from './gossip.js';
 import { linkPeers } from './linkPeers.js';
 import { presenceManager } from './presence.js';
@@ -29,6 +30,7 @@ class PeerManager {
         this.requested = new Set();
         this.onMembersChanged = () => {};
         this.onNetworkInfo = () => {};
+        this.onStalePeer = () => {};
         // Ask who is still there. Background tabs slow their timers down,
         // but they still answer messages right away, so a reply is reliable.
         setInterval(() => this.checkAlive(), HEARTBEAT_MS);
@@ -107,7 +109,23 @@ class PeerManager {
 
     checkAlive() {
         if (!this.peers.size) return;
+
+        // A phone that went to sleep can leave a dead connection behind.
+        // Someone who does not answer "are you there?" for a while is gone, so the old
+        // connection is closed and they can connect again fresh when they come back.
+        const now = Date.now();
+        [...this.profiles.entries()].forEach(([peerId, profile]) => {
+            if (this.peers.has(peerId) && profile.pingedAt && now - profile.pingedAt > networkSettings.staleMs) {
+                logger.warn(`⏱️ ${profile.username} stopped answering, closing the old connection`);
+                this.onStalePeer(peerId);
+                this.removePeer(peerId);
+            }
+        });
+
         this.broadcast({ type: 'ping' });
+        this.profiles.forEach((profile) => {
+            if (!profile.pingedAt) profile.pingedAt = now;
+        });
         this.sendStatus();
         setTimeout(() => renderPeerTable(), 1000);
     }
@@ -124,7 +142,10 @@ class PeerManager {
 
     handlePeerData(data, connection) {
         const seen = this.profiles.get(connection.peer);
-        if (seen) seen.lastSeen = Date.now();
+        if (seen) {
+            seen.lastSeen = Date.now();
+            seen.pingedAt = null;
+        }
         if (!['peer_status', 'ping', 'pong', 'here'].includes(data.type)) logger.info(`🎯 Received data, type: ${data.type}`);
 
         switch (data.type) {
