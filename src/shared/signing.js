@@ -153,6 +153,22 @@ export async function verifyChat(message) {
     return id === message.id;
 }
 
+// An admin's "clear all posts" note covers every post made before this time
+export function getWipeText(before) {
+    return `wtdb-wipe-1\n${before}`;
+}
+
+export async function signWipe(before, keys) {
+    const signer = keys || await getMyKeys();
+    const signature = await crypto.subtle.sign('Ed25519', signer.privateKey, encoder.encode(getWipeText(before)));
+    return { before, authorKey: signer.publicKey, signature: toBase64Url(signature) };
+}
+
+export function verifyWipe(note) {
+    if (!Number.isSafeInteger(note?.before) || note.before < 0) return Promise.resolve(false);
+    return verifyText(note.authorKey, note.signature, getWipeText(note.before));
+}
+
 export function verifyDelete(note) {
     if (!isEntryId(note?.entryId)) return Promise.resolve(false);
     return verifyText(note.authorKey, note.signature, getDeleteText(note.entryId));

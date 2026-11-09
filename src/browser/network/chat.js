@@ -6,6 +6,7 @@ import { claimName } from '../storage/db.js';
 import { getUsername } from '../../shared/username.js';
 import { networkSettings } from '../../shared/networkConfig.js';
 import { publishChat, startChatRelays } from './chatRelay.js';
+import { receiveDeletes, receiveWipe } from './deletes.js';
 import { signChat, verifyChat } from '../../shared/signing.js';
 import { isPublicKey, isSignature } from '../../shared/entryRules.js';
 import { logger } from '../../shared/logger.js';
@@ -177,8 +178,11 @@ export async function receiveChat(raw, sourcePeerId) {
     notify();
 }
 
-// Messages from the relays come from every room, so they are not passed on again
+// Messages from the relays come from every room, so they are not passed on again.
+// The relays also carry deletes and "clear all posts" notes, so every room hears about them.
 async function receiveFromRelay(raw) {
+    if (raw?.kind === 'delete') return receiveDeletes(raw.deletes, null);
+    if (raw?.kind === 'wipe') return receiveWipe(raw.wipe, null);
     if (await accept(raw)) notify();
 }
 

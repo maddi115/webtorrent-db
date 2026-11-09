@@ -5,6 +5,7 @@ import { makeThumbHash, resizeImage } from '../../shared/images.js';
 import { getTopic } from '../../shared/rooms.js';
 import { signEntry } from '../../shared/signing.js';
 import { getUsername } from '../../shared/username.js';
+import { ADMIN_KEYS } from '../../shared/admin.js';
 
 const OLD_DB_NAME = 'webtorrent-metadata-db-v2';
 const IMPORT_BATCH_SIZE = 200;
@@ -104,6 +105,7 @@ export async function signOldLinks() {
 
 export async function initDB() {
     ({ storageMode } = await call('open'));
+    await call('setAdminKeys', ADMIN_KEYS);
     await migrateOldDatabase();
     await addMissingThumbHashes();
     await signOldLinks();
@@ -198,6 +200,22 @@ export function claimName(name, key) {
 
 export function receiveEntries(entries) {
     return ready('receiveEntries', getTopic(), entries);
+}
+
+// Returns true if this "clear all posts" note was new and was applied
+export async function applyWipe(note) {
+    const applied = await ready('applyWipe', note);
+    if (applied) await updateEntryCount();
+    return applied;
+}
+
+export function getWipe() {
+    return ready('getWipe');
+}
+
+// Every post this key made, in every room, newest first
+export function getEntriesByAuthor(authorKey) {
+    return ready('getEntriesByAuthor', authorKey);
 }
 
 // Returns the delete notes that changed something here

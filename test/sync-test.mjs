@@ -486,6 +486,104 @@ export async function run({ setup } = {}) {
         await a.click('#chat-close');
         await b.click('#chat-close');
 
+        const adminKey = await makeTestKey();
+        const adminOptions = `testRoom=${TEST_ROOM}-admin&adminKey=${adminKey.publicKey}`;
+        const adminContext = await browser.newContext();
+        if (setup) await setup(adminContext);
+        await adminContext.addInitScript((key) => {
+            localStorage.setItem('webtorrent-signing-key', JSON.stringify(key));
+        }, adminKey);
+        const admin = await adminContext.newPage();
+        admin.on('pageerror', (e) => console.log(`  [Admin error] ${e.message}`));
+        await admin.goto(`${APP_URL}/?${adminOptions}`);
+        await admin.waitForFunction(() => document.getElementById('username-display')?.textContent);
+        const member = await openPeer(browser, 'Member', setup, adminOptions);
+        await Promise.all([waitForPeers(admin, 1), waitForPeers(member, 1)]);
+
+        const memberURL = (name) => `https://example.com/t/${name}-${ID}/1`;
+        await addLink(member, memberURL('member-room-one'), { magnet: `magnet:?xt=urn:btih:${hash}` });
+        await hasLink(admin, memberURL('member-room-one'));
+        await member.selectOption('#room-select', 'movies');
+        await new Promise((r) => setTimeout(r, 1000));
+        await addLink(member, memberURL('member-room-two'), { magnet: `magnet:?xt=urn:btih:${hash}` });
+        await new Promise((r) => setTimeout(r, 500));
+        await member.selectOption('#room-select', 'general');
+        await waitForPeers(member, 1);
+
+        await member.click('#profile-card');
+        report('Only the admin sees admin tools', await member.isHidden('#admin-tools')
+            && await admin.evaluate(() => !document.getElementById('admin-tools').hidden));
+        await member.click('#my-posts-btn');
+        await member.waitForSelector('#my-posts-list .my-post', { timeout: WAIT_MS });
+        const myPosts = await member.evaluate(() => [...document.querySelectorAll('#my-posts-list .my-post')]
+            .map((row) => row.textContent));
+        report('My posts lists your posts from every room', myPosts.length === 2
+            && myPosts.some((text) => text.includes('Room 1')) && myPosts.some((text) => text.includes('Room 2')),
+            myPosts.map((text) => text.replace(/\s+/g, ' ').slice(0, 60)).join(' | '));
+        const roomTwoRow = '#my-posts-list .my-post:has(.my-post-meta:text-matches("Room 2")) .my-post-delete';
+        await member.click(roomTwoRow);
+        const asksFirstHere = await member.textContent(roomTwoRow) === 'Sure?';
+        await member.click(roomTwoRow);
+        await member.waitForFunction(() => document.querySelectorAll('#my-posts-list .my-post').length === 1,
+            null, { timeout: WAIT_MS }).catch(() => {});
+        report('You can delete your posts from My posts', asksFirstHere
+            && await countLink(member, memberURL('member-room-two')) === 0
+            && await member.evaluate(() => document.querySelectorAll('#my-posts-list .my-post').length) === 1);
+        report('My posts uses no innerHTML', await member.evaluate(async () => {
+            const code = await (await fetch('/src/browser/ui/myPosts.js')).text();
+            return !/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(code);
+        }));
+        await member.click('#my-posts-close');
+
+        await admin.fill('#search-input', `member-room-one-${ID}`);
+        const removeButton = `.results-table tr:has(a[href="${memberURL('member-room-one')}"]) [data-action="delete"]`;
+        await admin.waitForSelector(removeButton, { timeout: WAIT_MS });
+        const removeLabel = await admin.textContent(removeButton);
+        await admin.click(removeButton);
+        await admin.click(removeButton);
+        const removedEverywhere = async (url) => {
+            const deadline = Date.now() + WAIT_MS;
+            while (Date.now() < deadline) {
+                if (await countLink(admin, url) === 0 && await countLink(member, url) === 0) return true;
+                await new Promise((r) => setTimeout(r, 200));
+            }
+            return false;
+        };
+        report('The admin can remove anyone\'s post', removeLabel === 'Remove'
+            && await removedEverywhere(memberURL('member-room-one')));
+        await admin.fill('#search-input', '');
+
+        await addLink(member, memberURL('before-clear'), { magnet: `magnet:?xt=urn:btih:${hash}` });
+        const beforeClear = await hasLink(admin, memberURL('before-clear'));
+        await new Promise((r) => setTimeout(r, 50));
+        await admin.click('#profile-card');
+        await admin.click('#clear-all-btn');
+        await admin.click('#clear-all-btn');
+        const stillThere = await countLink(admin, memberURL('before-clear')) === 1;
+        const lastWarning = await admin.textContent('#clear-all-btn');
+        await admin.click('#clear-all-btn');
+        report('Clear all needs 3 clicks', stillThere && lastWarning.includes('1 more'), lastWarning);
+        report('Clear all removes every post for everyone', await removedEverywhere(memberURL('before-clear')));
+        await admin.click('#name-cancel');
+
+        const afterClear = await member.evaluate(async (old) => {
+            const { getEntryByURL } = await import('/src/browser/storage/db.js');
+            const { toPublicEntry } = await import('/src/shared/entryId.js');
+            const { gossip } = await import('/src/browser/network/gossip.js');
+            await gossip.receiveEntry(toPublicEntry(old), 'test-peer');
+            const cameBack = Boolean(await getEntryByURL(old.sourceURL));
+            const { applyWipe } = await import('/src/browser/storage/db.js');
+            const { signWipe } = await import('/src/shared/signing.js');
+            const fakeWipe = await applyWipe(await signWipe(Date.now()));
+            return { cameBack, fakeWipe };
+        }, beforeClear);
+        report('Cleared posts do not come back', !afterClear.cameBack);
+        report('Only the admin can clear posts', !afterClear.fakeWipe);
+        await addLink(member, memberURL('after-clear'), { magnet: `magnet:?xt=urn:btih:${hash}` });
+        report('New posts work after a clear', Boolean(await hasLink(admin, memberURL('after-clear'))));
+        await adminContext.close();
+        await member.close();
+
         const c = await openPeer(browser, 'C', setup);
         await waitForPeers(c, 2);
         const historyArrived = await c.waitForFunction(async () => {

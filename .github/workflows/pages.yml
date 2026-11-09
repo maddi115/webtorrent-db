@@ -31,6 +31,7 @@ jobs:
         env:
           PAGES_BASE: /webtorrent-db/
           VITE_TURN_ENDPOINT: ${{ vars.TURN_ENDPOINT }}
+          VITE_ADMIN_KEYS: ${{ vars.ADMIN_KEYS }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -11,7 +11,7 @@ import { MAX_AVATAR_CHARS, MAX_PREVIEW_CHARS, safeImage, shortText } from '../..
 import { renderPeerTable } from '../ui/peerTable.js';
 import { receiveThumbnail, sendThumbnail } from '../ui/thumbnails.js';
 import { handleFingerprints, handleLists, startSync } from './smartSync.js';
-import { receiveDeletes } from './deletes.js';
+import { receiveDeletes, receiveWipe, sendWipe } from './deletes.js';
 import { forgetMember, receiveHere } from './roomPresence.js';
 import { receiveChat, receiveHistory, sendHistory } from './chat.js';
 import { handleChunk, handleChunkRequest, handleLinkGap, handleOffer } from './snapshotManager.js';
@@ -155,6 +155,10 @@ class PeerManager {
                 receiveDeletes(data.deletes, connection.peer);
                 break;
 
+            case 'wipe':
+                receiveWipe(data.wipe, connection.peer);
+                break;
+
             case 'chat':
                 receiveChat(data.message, connection.peer);
                 break;
@@ -246,6 +250,7 @@ class PeerManager {
         this.onNetworkInfo(data);
         this.handleProfile(data, connection);
         sendHistory(connection);
+        sendWipe(connection);
         this.onMembersChanged();
         this.chooseSync(data, connection);
     }

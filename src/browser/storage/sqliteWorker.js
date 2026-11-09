@@ -2,7 +2,7 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { getEntryId } from '../../shared/entryId.js';
 import { cleanRemoteEntry } from '../../shared/entryRules.js';
-import { verifyDelete, verifyEntry } from '../../shared/signing.js';
+import { verifyDelete, verifyEntry, verifyWipe } from '../../shared/signing.js';
 import {
     compressSnapshot, decompressSnapshot, packSnapshot, unpackSnapshot
 } from '../../shared/snapshot.js';
@@ -27,6 +27,8 @@ let storageMode = 'opfs';
 const syncIndexes = new Map();
 const snapshots = new Map();
 const blockedKeys = new Map();
+let adminKeys = new Set();
+let wipeBefore = null;
 
 const SCHEMA = `
     CREATE TABLE IF NOT EXISTS entries (
@@ -252,22 +254,57 @@ function isBlocked(authorKey, now) {
     return false;
 }
 
-// A delete note, if this link's own author deleted it
+// The post's author, or an admin, may delete it
+function mayDelete(noteKey, postKey) {
+    return noteKey === postKey || adminKeys.has(noteKey);
+}
+
+// A delete note, if this link's author or an admin deleted it
 function deletionFor(entryId, authorKey) {
     const note = selectOne(
         'SELECT entry_id AS entryId, author_key AS authorKey, signature FROM deletions WHERE entry_id = ?',
         [entryId]
     );
-    return note && note.authorKey === authorKey ? note : null;
+    return note && mayDelete(note.authorKey, authorKey) ? note : null;
 }
 
-// Only the key that signed a post can delete it. The note is kept, so the post cannot come back.
+// The newest "clear all posts" note from an admin, kept so cleared posts cannot come back
+function getWipe() {
+    if (wipeBefore !== null) return wipeBefore;
+    try {
+        const saved = JSON.parse(selectOne("SELECT value FROM meta WHERE key = 'wipe'")?.value || 'null');
+        wipeBefore = saved && adminKeys.has(saved.authorKey) ? saved : false;
+    } catch {
+        wipeBefore = false;
+    }
+    return wipeBefore;
+}
+
+// Only an admin can clear everything. Every post made before the note's time is removed, in every room.
+async function applyWipe(note) {
+    if (!adminKeys.has(note?.authorKey) || note.before > Date.now() + FUTURE_LIMIT_MS) return false;
+    const current = getWipe();
+    if (current && current.before >= note.before) return false;
+    if (!await verifyWipe(note)) return false;
+
+    const saved = { before: note.before, authorKey: note.authorKey, signature: note.signature };
+    db.transaction(() => {
+        db.exec({ sql: 'DELETE FROM entries WHERE timestamp < ?', bind: [note.before] });
+        db.exec({ sql: "INSERT OR REPLACE INTO meta (key, value) VALUES ('wipe', ?)", bind: [JSON.stringify(saved)] });
+    });
+    wipeBefore = saved;
+    syncIndexes.clear();
+    snapshots.clear();
+    return true;
+}
+
+// Only the key that signed a post, or an admin, can delete it. The note is kept, so the post cannot come back.
 // Notes are only kept for posts this browser has, so nobody can flood peers with junk notes.
 async function applyDeletes(notes) {
     const applied = [];
     for (const note of notes) {
         const entry = selectOne('SELECT room, author_key AS authorKey FROM entries WHERE entry_id = ?', [note?.entryId]);
-        if (!entry || entry.authorKey !== note.authorKey) continue;
+        if (!entry || !mayDelete(note.authorKey, entry.authorKey)) continue;
         if (!await verifyDelete(note)) continue;
 
         db.transaction(() => {
@@ -298,6 +335,8 @@ async function receiveEntries(room, rawEntries) {
         if (!entry.signature) { reject('unsigned'); continue; }
         if (entry.timestamp > now + FUTURE_LIMIT_MS) { reject('future'); continue; }
         if (isBlocked(entry.authorKey, now)) { reject('blocked'); continue; }
+        const wipe = getWipe();
+        if (wipe && entry.timestamp < wipe.before) { reject('cleared'); continue; }
 
         entry.entryId = await getEntryId(entry);
         const note = deletionFor(entry.entryId, entry.authorKey);
@@ -358,6 +397,26 @@ const methods = {
     },
 
     applyDeletes,
+
+    applyWipe,
+
+    setAdminKeys(keys) {
+        adminKeys = new Set(Array.isArray(keys) ? keys : []);
+        wipeBefore = null;
+    },
+
+    getWipe() {
+        return getWipe() || null;
+    },
+
+    getEntriesByAuthor(authorKey) {
+        return selectAll(
+            `SELECT ${ENTRY_COLUMNS} FROM entries
+             WHERE author_key = ? AND signature IS NOT NULL
+             ORDER BY timestamp DESC LIMIT 1000`,
+            [authorKey]
+        );
+    },
 
     getUnsignedEntries() {
         return selectAll(`SELECT ${ENTRY_COLUMNS}, preview FROM entries WHERE signature IS NULL`);

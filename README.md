@@ -75,6 +75,19 @@ Open http://localhost:4173/?room=books
 
 Rooms: `general`, `movies`, `music`, `software`, `games`, and `books`.
 
+## Admin
+
+The admin can remove anyone's post and clear every post in all 6 rooms.
+Everyone can see and delete their own posts under Profile, then My posts.
+
+To become the admin:
+1. Open the site, click your profile, and copy "Your key".
+2. On GitHub, go to Settings, then Secrets and variables, then Actions, then Variables.
+3. Add a variable named `ADMIN_KEYS` with your key. Separate several keys with commas.
+4. Run the Deploy to GitHub Pages workflow again.
+
+Only that browser has your key, so use the same browser for admin work.
+
 ## Network settings
 
 Copy `.env.example` to `.env.local` to add your own bootstrap relays or switch on TURN.

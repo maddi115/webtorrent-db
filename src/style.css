@@ -537,6 +537,169 @@ footer span {
   color: #000;
 }
 
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #333;
+}
+
+.profile-section[hidden],
+.my-posts-empty[hidden] {
+  display: none;
+}
+
+.profile-wide-button,
+.profile-small-button {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #1a1a1a;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-small-button {
+  height: 28px;
+  padding: 0 10px;
+}
+
+.profile-wide-button:hover,
+.profile-small-button:hover {
+  border-color: #aaa;
+}
+
+.profile-key-row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.profile-key {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #ddd;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-tools strong {
+  font-size: 13px;
+}
+
+.admin-danger {
+  height: 34px;
+  border: 1px solid #6b2b2b;
+  border-radius: 6px;
+  background: #1a0d0d;
+  color: #ff8a8a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-danger[data-step="1"] {
+  background: #3a1111;
+  color: #fff;
+}
+
+.admin-danger[data-step="2"] {
+  border-color: #ff6b6b;
+  background: #b42318;
+  color: #fff;
+}
+
+.my-posts-panel {
+  width: 460px;
+  max-height: 80vh;
+}
+
+.my-posts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.my-posts-close {
+  border: 0;
+  background: none;
+  color: #aaa;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.my-posts-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.my-post {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid #222;
+}
+
+.my-post-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.my-post-title {
+  overflow: hidden;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-post-title:hover {
+  text-decoration: underline;
+}
+
+.my-post-meta {
+  color: #999;
+  font-size: 12px;
+}
+
+.my-post-delete {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #6b2b2b;
+  border-radius: 6px;
+  background: #111;
+  color: #ff8a8a;
+  font: inherit;
+  cursor: pointer;
+}
+
+.my-post-delete[data-confirm="yes"] {
+  border-color: #ff6b6b;
+  background: #3a1111;
+  color: #fff;
+}
+
+.my-posts-empty {
+  margin: 0;
+  padding: 24px 0;
+  color: #aaa;
+  text-align: center;
+}
+
 /* Old profile picture button */
 .profile-btn {
   width: 36px;

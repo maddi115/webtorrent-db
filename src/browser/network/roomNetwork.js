@@ -402,6 +402,22 @@ export function getRelayCount() {
 }
 
 // Relay connections can quietly fail, so an empty browser joins again
+// Each try waits twice as long as the last, so a slow connection has time to finish
+const MAX_REJOIN_WAIT_MS = Math.max(aloneMs * 4, 5 * 60 * 1000);
+let rejoinWait = aloneMs;
+
+function scheduleRejoin() {
+    setTimeout(() => {
+        if (peerManager.peers.size > 0) {
+            rejoinWait = aloneMs;
+        } else {
+            rejoinIfAlone();
+            rejoinWait = Math.min(rejoinWait * 2, MAX_REJOIN_WAIT_MS);
+        }
+        scheduleRejoin();
+    }, rejoinWait);
+}
+
 function rejoinIfAlone() {
     if (peerManager.peers.size > 0) return;
 
@@ -445,7 +461,7 @@ function checkRelays() {
 setTimeout(checkRelays, RELAY_CHECK_MS);
 setInterval(checkRelays, 10 * RELAY_CHECK_MS);
 
-setInterval(rejoinIfAlone, aloneMs);
+scheduleRejoin();
 setInterval(() => scheduleRebalance(), 5000);
 
 // Say goodbye when the page closes, so others drop you right away

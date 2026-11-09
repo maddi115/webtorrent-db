@@ -9,6 +9,7 @@ import { initSeedingMode } from './browser/ui/seedingMode.js';
 import { renderShareStats } from './shared/shareStats.js';
 import { initPeerTable } from './browser/ui/peerTable.js';
 import { initChat } from './browser/ui/chatPanel.js';
+import { initMyPosts } from './browser/ui/myPosts.js';
 import { getStorageMode, initDB } from './browser/storage/db.js';
 import { gossip } from './browser/network/gossip.js';
 import { downloadManager } from './browser/downloads/downloadManager.js';
@@ -53,6 +54,7 @@ async function init() {
     initProfile();
     initPeerTable();
     initChat();
+    initMyPosts();
     
     const username = getUsername();
     const usernameDisplay = document.getElementById('username-display');

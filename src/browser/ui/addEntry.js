@@ -92,6 +92,7 @@ export function initAddEntry() {
         gossip.propagateEntry(entry);
         
         showToast(`✅ Added: ${title}`);
+        window.dispatchEvent(new CustomEvent('posts-changed'));
         
         document.getElementById('entry-title').value = '';
         document.getElementById('source-url').value = '';

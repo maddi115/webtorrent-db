@@ -13,6 +13,7 @@ import { thumbHashToImage } from '../../shared/images.js';
 import { openPreview } from './preview.js';
 import { watchThumbnails } from './thumbnails.js';
 import { getMyKeys } from '../../shared/signing.js';
+import { isAdminKey } from '../../shared/admin.js';
 import { deleteOwnPost } from '../network/deletes.js';
 
 const ROWS_PER_PAGE = 20;
@@ -140,6 +141,8 @@ function renderActions(entry) {
 
     if (entry.signature && myKey && entry.authorKey === myKey) {
         buttons.push(`<button type="button" class="result-delete" data-action="delete" data-entry-id="${id}" aria-label="Delete your post">Delete</button>`);
+    } else if (entry.signature && myKey && isAdminKey(myKey)) {
+        buttons.push(`<button type="button" class="result-delete" data-action="delete" data-entry-id="${id}" aria-label="Remove this post as admin" title="Remove as admin">Remove</button>`);
     }
 
     return buttons.join('') || '<span class="result-muted">No link</span>';
@@ -247,12 +250,13 @@ function handleTableClick(event) {
 // The first click asks "Sure?", the second click deletes
 async function confirmDelete(button, entry) {
     if (button.dataset.confirm !== 'yes') {
+        const label = button.textContent;
         button.dataset.confirm = 'yes';
         button.textContent = 'Sure?';
         setTimeout(() => {
             if (button.isConnected) {
                 delete button.dataset.confirm;
-                button.textContent = 'Delete';
+                button.textContent = label;
             }
         }, CONFIRM_MS);
         return;
